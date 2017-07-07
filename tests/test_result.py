@@ -8,6 +8,17 @@ class TestResult(BaseTestCase):
         self.assertEqual(self.post(['foo']), [1])
         messages=self.pull()
         self.assertDictContainsSubset({'id':1,'message':'foo'}, messages[0])
+        self.assertInDatabase(
+            'queue1_rst',
+            {
+                'm_id':1,
+                'receiver':'receiver1',
+                'status':'processing',
+                'fail_count':0,
+                'result':None
+            }
+        )
+
         data = {
             'receiver': 'receiver1',
             'results': {
@@ -24,6 +35,7 @@ class TestResult(BaseTestCase):
                 'm_id':1,
                 'receiver':'receiver1',
                 'status':'finished',
+                'fail_count':0,
                 'result':'done'
             }
         )
@@ -99,7 +111,7 @@ class TestResult(BaseTestCase):
             {
                 'm_id':2,
                 'receiver':'receiver1',
-                'status':'pending',
+                'status':'processing',
             }
         )
 

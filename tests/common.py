@@ -59,6 +59,11 @@ def clear_db():
         user=MYSQL['USRE'],
         db=MYSQL['DATABASE']
     )
+    # important!!!
+    # When use innodb, different queries are in the same transaction and the default isolation level is repeatable read
+    # so update is invisible
+    # https://stackoverflow.com/questions/384228/database-does-not-update-automatically-with-mysql-and-python
+    db.autocommit(True)
 
 # set base url for requests
 class Session(requests.Session):
@@ -121,17 +126,21 @@ class BaseTestCase(unittest.TestCase):
         return messages
 
     # performe check in a database, inspired by <http://codeception.com/docs/modules/Db>
-    def _select(table, criteria):
+    def _select(self, table, criteria):
         where = []
         for column, value in criteria.items():
-            if type(value)==str:
+            if value is None:
+                where.append("%s is NULL"%column)
+            elif type(value)==str:
                 where.append("%s='%s'"%(column, value))
             else:
                 where.append("%s=%s"%(column, value))
         c=db.cursor()
         sql = 'select * from %s where %s limit 1'%(table, ' and '.join(where))
-        c.execute(sql)
-        r=c.fetchone()
+        # print(sql)
+        r = c.execute(sql)
+        # r=1 or 0
+        return c.fetchone()
 
     def assertInDatabase(self, table, criteria):
         self.assertIsNotNone(self._select(table, criteria))

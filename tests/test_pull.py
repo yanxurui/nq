@@ -20,7 +20,7 @@ class TestPull(BaseTestCase):
         self.assertDictContainsSubset({'id':2,'message':'bar'}, messages[0])
         
         messages=self.pull()
-        self.assertDictContainsSubset({'id':3,'message':'baz'}, messages[1])
+        self.assertDictContainsSubset({'id':3,'message':'baz'}, messages[0])
 
     def test_pull_wait(self):
         # the queue is still empty
@@ -64,7 +64,7 @@ class TestPull(BaseTestCase):
         self.assertEqual(self.post(['foo']), [1])
 
         # ignore existing messages, wait for new message
-        g1=gevent.spawn(self.pull, start=0, max_count=3)
+        g1=gevent.spawn(self.pull, start=-2, max_count=3)
         gevent.idle()
         self.assertEqual(self.post(['bar', 'baz']), [2,3])
         messages = g1.get()
@@ -90,7 +90,6 @@ class TestPull(BaseTestCase):
         r = s.post('/pull', json=data)
         self.assertEqual(r.status_code, 200)
         messages = r.json()['messages']
-        print(messages)
         messages1 = messages['queue1']
         self.assertEqual(len(messages1), 2)
         self.assertDictContainsSubset({'id':1,'message':'foo'}, messages1[0])
@@ -121,17 +120,14 @@ class TestPull(BaseTestCase):
         start = time()
         data = {
             "receiver": "receiver1",
+            "timeout": 0.5,
             "queues": {
               "queue1": {}
-            },
-            "timeout": 0.5
+            }
         }
         r = s.post('/pull', json=data)
         elapsed = time() - start
-        self.assertEqual(r.status_code, 404)
-        self.assertEqual(r.json(), {
-            "queue1": 0
-        })
+        self.assertEqual(r.status_code, 204)
         self.assertAlmostEqual(elapsed, 0.5, delta=0.1)
 
 

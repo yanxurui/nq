@@ -9,6 +9,9 @@ NQ(nginx as a queue) is not solely a message brocker.
 * http api, easy to debug
 * well tested
 
+This documentation refers message as job or task depending on application scenarios. They are actually the same thing in database.
+
+
 ## Restful API
 
 ### POST
@@ -58,7 +61,9 @@ Req:
   "queues": {
     "queue1": {
       "start": 3,
-      "max": 10
+      "max": 10,
+      "retry_num": 3,
+      "retry_timeout": 60
     },
     ...
   },
@@ -131,3 +136,14 @@ some specical values of id can be
 * 0: there is no message yet
 * NULL: an error occurs when query the last id of this queue
 
+
+
+
+## config
+
+
+### retry
+A job is considered failed if it is retried `retry_num` times which is reflected by the value of `fail_count` field in result table.
+If the param `retry_num` is set to 0, the status of a message will become failed the moment it is retrieved until it is acknowledged later. This may be kind of confused at first.
+
+A `processing` job will be retried after `fail_timeout` seconds unless it gets an acknowledgement or exceeds `retry_num`. Retry happen in a lazy mode instead of as soon as possible. A receiver can only get retry tasks when there is no new messages available.
