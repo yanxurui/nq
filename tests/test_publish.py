@@ -14,10 +14,28 @@ class TestPublish(BaseTestCase):
         self.assertEqual(self.post(['fooooo', 'bazzzzz']), [4, 5])
 
     def test_publish_2_senders(self):
+        self.assertEqual(self.post(['foo', 'bar']), [1, 2])
+        self.assertEqual(self.post(['baz'], sender='sender2'), [3])
+
+    def test_publish_simultaneously(self):
+        # when table doesn't exist
         g1=gevent.spawn(self.post, ['foo'])
-        g2=gevent.spawn(self.post, ['bar', 'baz'], sender='sender2')
-        gevent.joinall([g1, g2])
-        self.assertItemsEqual(g1.get()+g2.get(), [1, 2, 3])
+        g2=gevent.spawn(self.post, ['bar', 'baz'])
+        g3=gevent.spawn(self.post, ['qux'])
+        gevent.joinall([g1, g2, g2])
+        self.assertItemsEqual(
+            g1.get()+g2.get()+g3.get(),
+            [1, 2, 3, 4]
+        )
+        # when table already exist
+        g1=gevent.spawn(self.post, ['hello'])
+        g2=gevent.spawn(self.post, ['world'])
+        g3=gevent.spawn(self.post, ['!'])
+        gevent.joinall([g1, g2, g2])
+        self.assertItemsEqual(
+            g1.get()+g2.get()+g3.get(),
+            [5, 6, 7]
+        )
 
     def test_publish_2_queues(self):
         data = {

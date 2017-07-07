@@ -76,12 +76,9 @@ end
 local function set_last_id(queue, receiver, last_id, count)
     local key = receiver and queue..'.'..receiver or queue
     log(INFO, key, ':', last_id, ',', count)
-    if not count then
-        -- set default value
-        count = 1
-    end
     local old_last_id = cache_last_id:get(key)
     if receiver then
+        assert(count==nil)
         if not old_last_id then
             return
         end
@@ -90,13 +87,13 @@ local function set_last_id(queue, receiver, last_id, count)
             return
         end
     else
-        -- check consistency for queue's last id
-        if old_last_id then
-            assert(last_id==old_last_id+1)
+        -- compute according to insert_id and affected_rows
+        last_id = last_id + count - 1
+        if old_last_id and last_id<=old_last_id then
+            return
         end
     end
-    -- compute according to insert_id and affected_rows
-    last_id = last_id + count - 1
+
     cache_last_id:set(key, last_id, ttl)
 end
 
@@ -241,11 +238,18 @@ function _M.post_messages(queue, sender, messages)
     local values = {}
     for i, message in ipairs(messages) do
         -- todo: sender is nil
-        table.insert(values, string.format("(\'%s\', \'%s\')", sender, message))
+        table.insert(values, string.format([[('%s', '%s')]], sender, message))
     end
-    local sql = string.format("insert into %s_msg(sender, message) values%s", queue, table.concat(values, ','))
+    local sql = string.format([[insert into %s_msg(sender, message) values%s]],
+        queue, table.concat(values, ','))
+    local flag = 0
     ::insert::
+    flag = flag + 1
+    if flag > 3 then
+        return 500, 'dead loop'
+    end
     local res, err, errcode, sqlstate = db:query(sql)
+    print('res: ', inspect(res))
     if not res then
         -- error code 1146 means "Message: Table '%s.%s' doesn't exist"
         if errcode == 1146 then
@@ -276,12 +280,17 @@ INDEX status_idx(status)
             local res, err, errcode, sqlstate = db:query(create_sql)
             print('res: ', inspect(res))
             if not res then
+                if errcode == 1050 then
+                    log(INFO, err)
+                    -- Table '%s.%s' already exists
+                    goto insert -- this could lead to dead loop
+                end
                 log(ERR, "failed to create message table: ", err, ": ", errcode, ": ", sqlstate, ".")
                 return 500, 'mysql error'
             end
             assert(err=='again')
             res, err, errcode, sqlstate = db:read_result(create_sql)
-            print('+++', inspect(res))
+            print('res: ', inspect(res))
             if not res then
                 log(ERR, "failed to create result table: ", err, ": ", errcode, ": ", sqlstate, ".")
                 return 500, 'mysql error'
