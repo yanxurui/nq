@@ -61,3 +61,8 @@ class TestPublish(BaseTestCase):
         }
         r = s.post('/post', json=data)
         self.assertEqual(r.status_code, 400)
+
+    def test_publish_long_message(self):
+        # 1 MB
+        self.assertEqual(self.post(['0'*1024*1024]), [1])
+
