@@ -17,7 +17,6 @@ local cache_last_id, err = lrucache.new(10000)
 if not cache_last_id then
     return error("failed to create the cache: " .. (err or "unknown"))
 end
-
 local cache_processing_num, err = lrucache.new(10000)
 if not cache_processing_num then
     return error("failed to create the cache: " .. (err or "unknown"))
@@ -77,23 +76,17 @@ local function set_last_id(queue, receiver, last_id, count)
     local key = receiver and queue..'.'..receiver or queue
     log(INFO, key, ':', last_id, ',', count)
     local old_last_id = cache_last_id:get(key)
-    if receiver then
-        assert(count==nil)
-        if not old_last_id then
-            return
-        end
-        if last_id <= old_last_id then
-            -- this can happen when retrieve the same message again
-            return
-        end
-    else
+    if count then
         -- compute according to insert_id and affected_rows
         last_id = last_id + count - 1
-        if old_last_id and last_id<=old_last_id then
+    end
+    if old_last_id then
+        if receiver then
+            assert(last_id>old_last_id)
+        elseif last_id<=old_last_id then
             return
         end
     end
-
     cache_last_id:set(key, last_id, ttl)
 end
 
