@@ -1,0 +1,3 @@
+[submodule "deps/inspect"]
+	path = deps/inspect
+	url = https://github.com/kikito/inspect.lua.git
