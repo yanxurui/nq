@@ -79,6 +79,9 @@ end
 ::done::
 ngx.status = status
 if res then
+    if status == 500 and type(res) == 'string' then
+        res = {_error=res}
+    end
     ngx.print(cjson_safe.encode(res))
 end
 

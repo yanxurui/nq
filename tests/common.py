@@ -13,22 +13,10 @@ import MySQLdb
 import gevent
 from gevent import monkey
 
+from config import *
+
 monkey.patch_all()
 
-
-######## CONFIG BEGIN ########
-NGX_BIN = '/opt/nginx/sbin/nginx'
-PREFIX = '/opt/nq/'
-HOST = 'http://127.0.0.1:8001'
-
-MYSQL = {
-    'HOST': '127.0.0.1',
-    'PORT': 3306,
-    'USRE': 'root',
-    'PASSWORD': '',
-    'DATABASE': 'nq_test'
-}
-######## CONFIG END ########
 
 def reload_ngx():
     cmd = [NGX_BIN, '-p', PREFIX]
@@ -48,7 +36,9 @@ def clear_db():
     global db
     db=MySQLdb.connect(
         host=MYSQL['HOST'],
+        port=MYSQL['port'],
         user=MYSQL['USRE'],
+        passwd=MYSQL['PASSWORD'],
     )
     c=db.cursor()
     c.execute("drop database if exists %s" % MYSQL['DATABASE'])
@@ -56,7 +46,9 @@ def clear_db():
     # select database to use
     db=MySQLdb.connect(
         host=MYSQL['HOST'],
+        port=MYSQL['port'],
         user=MYSQL['USRE'],
+        passwd=MYSQL['PASSWORD'],
         db=MYSQL['DATABASE']
     )
     # important!!!

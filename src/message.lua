@@ -251,7 +251,6 @@ function _M.post_messages(queue, sender, messages)
             local template = [[create table %s_msg(
 id INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
 sender VARCHAR(20) NOT NULL,
-tag SET('a', 'b', 'c', 'd'),
 created_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 message MEDIUMBLOB NOT NULL
 );
