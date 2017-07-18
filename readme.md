@@ -1,7 +1,7 @@
 ## Introduction
 NQ(nginx as a queue) is a message queue built using NGINX(lua) and MYSQL. It provides REST API. Messages are pulled by HTTP long polling.
 As most message brokers do, NQ can work as a FIFO queue or PUB/SUB pattern.
-NQ is not only a message broker. It persists messages in mysql as long as receiver's processing time and result.
+NQ is not only a message broker, it persists messages in mysql as well as receiver's processing time and result.
 
 
 ## Advantages
@@ -24,12 +24,20 @@ If the param `retry_num` is set to 0, the status of a message will become failed
 ### step 1: install nginx
 you should use openresty or build nginx with the latest lua module(to be exact, v0.10.9 or later which requires luajit 2.1) by yourself.
 
-### step 2: download(todo: submodule, cjson)
-clone this repository and all its submodules to where you want to install. Please make sure the user(nobody by default) who run nginx worker has read and execute permission for this directory and all of its parent directories.
-After that, execute INSTALL script.
+### step 2: download and install
+clone this repository and all its submodules to where you want to install. Please make sure the user(nobody) who run nginx worker has read and execute permission for this directory and **all of its parent directories**.
 ```
-git@github.com:yanxurui/nq.git
+git clone --recursive git@github.com:yanxurui/nq.git
 cd nq
+```
+Before install, edit lua-cjson's Makefile
+```
+pushd deps/lua-cjson
+git apply ../cjson-diff.txt
+popd
+```
+execute INSTALL script
+```
 ./INSTALL.sh
 ```
 
@@ -71,14 +79,14 @@ python -m unittest discover -v
 
 
 ## REST API
-It's recommended to use a client specific to a language instead of these apis directly. Clients are well written to be efficient and convenient to use as well as to deal with various exceptions. Only python and php clients are available so far.
+It's recommended to use a client specific to a language instead of these apis directly. Clients are well written to be efficient and deal with various exceptions. Only python and php clients are available so far.
 
 This documentation refers message as job or task depending on application scenario. Receiver is the same as worker, subscriber or consumer meanwhile sender is the same as publisher or producer.
 
 ### POST
 post messages to one or more queues. Messages are saved in mysql.
 
-Req:
+#### Req:
 ```
 POST /post
 {
@@ -93,7 +101,7 @@ POST /post
 
 **messages**: A dict with **queue name** as key and **a list of messages** as value. Message must be string.
 
-Resp:
+#### Resp:
 ```
 200
 {
@@ -119,10 +127,9 @@ In most cases, `_error` is the only field in the response.
 pull new messages, save results or do both at the same time. Acknowledgement is made by the way of sending results.
 Receivers are blocked if there are no unreceived messages yet unless timeout is set to 0.
 
-Req:
+#### Req:
 ```
 POST /pull
-Req:
 {
   "receiver": "receiver1",
   "timeout": 10,
@@ -165,7 +172,10 @@ Below are all parameters and their meaning.
 
 **results**: a dict with queue name as key and a dict of results as value. Every result item is a pair of message id and result string.
 
-Resp:
+Note
+1. the message id here is a string since JSON only allows key names to be strings.
+
+#### Resp:
 ```
 200
 {
@@ -185,8 +195,7 @@ Resp:
   
 }
 ```
-Note:
-1. the message id here is a string since JSON only allows key names to be strings.
-2. `created_time` may be ommitted if the message is retrived from cache without querying myql.
+Note
+1. `created_time` may be ommitted if the message is retrived from cache without querying myql.
 
 

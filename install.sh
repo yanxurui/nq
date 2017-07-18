@@ -8,7 +8,7 @@ cp -r deps/lua-resty-core/lib ./
 cp -r deps/lua-resty-lrucache/lib ./
 cp -r deps/lua-resty-mysql/lib ./
 
-# inspect.lua
+# install inspect.lua
 cp deps/inspect/inspect.lua ./lib/
 
 # compile and install lua-cjson
