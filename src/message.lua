@@ -251,14 +251,14 @@ function _M.post_messages(queue, sender, messages)
             local template = [[create table %s_msg(
 id INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
 sender VARCHAR(20) NOT NULL,
-created_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+created_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
 message MEDIUMBLOB NOT NULL
 );
 create table %s_rst(
 m_id INT UNSIGNED,
 receiver VARCHAR(20) NOT NULL,
-created_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-updated_time DATETIME(3) NOT NULL ON UPDATE CURRENT_TIMESTAMP,
+created_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+updated_time DATETIME(3) ON UPDATE CURRENT_TIMESTAMP(3),
 status ENUM('processing', 'finished', 'failed') NOT NULL DEFAULT 'processing',
 fail_count TINYINT UNSIGNED DEFAULT 0,
 result VARBINARY(1024),
