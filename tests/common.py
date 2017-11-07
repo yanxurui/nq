@@ -20,13 +20,20 @@ monkey.patch_all()
 
 
 def reload_ngx():
+    cmd = [NGX_BIN, '-p', PREFIX]
+    # stop first
+    if os.path.isfile(PREFIX+'logs/nginx.pid'):
+        cmd2 = cmd + ['-s', 'stop']
+        try:
+            out = subprocess.check_output(cmd2, stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as exc:
+            print(out)
+    # delete old logs
     logs = PREFIX + 'logs/'
     if os.path.isdir(logs):
-        os.remove(logs + 'error.log')
-        os.remove(logs + 'access.log')
-    cmd = [NGX_BIN, '-p', PREFIX]
-    if os.path.isfile(PREFIX+'logs/nginx.pid'):
-        cmd.extend(['-s', 'reload'])
+        shutil.rmtree(logs)
+        os.mkdir(logs)
+    # start
     try:
         out = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
     except subprocess.CalledProcessError as exc:
