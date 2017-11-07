@@ -1,5 +1,5 @@
 ## Introduction
-NQ(nginx as a queue) is a message queue built using NGINX(lua) and MYSQL. It provides REST API. Messages are pulled by HTTP long polling.
+NQ(nginx as a queue) is a message queue based on ngx-lua and MYSQL. It provides REST API. Messages are pulled by HTTP long polling.
 As most message brokers do, NQ can work as a FIFO queue or PUB/SUB pattern.
 NQ is not only a message broker, it persists messages in mysql as well as receiver's processing time and result.
 
@@ -14,35 +14,40 @@ NQ is not only a message broker, it persists messages in mysql as well as receiv
 
 
 ## Retry
-A `processing` job will be retried after `fail_timeout` seconds unless it gets an acknowledgement or exceeds `retry_num`. Retry happen in a lazy mode instead of as soon as possible. A receiver can only get retry tasks when there is no new messages available for this receiver.
+A `processing` job will be retried after `fail_timeout` seconds unless it an acknowledgement is received or exceeds `retry_num`. Retry happen in a lazy mode instead of as soon as possible. A receiver can only get retry tasks when there is no new messages available for this receiver.
 
 A job is considered failed if it is retried `retry_num` times which is reflected by the value of `fail_count` field in result table.
 If the param `retry_num` is set to 0, the status of a message will become failed the moment it is retrieved until it is acknowledged later. This may be kind of confused at first.
 
 
 ## Install
-### step 1: install nginx
-you should use openresty or build nginx with the latest lua module(to be exact, v0.10.9 or later which requires luajit 2.1) by yourself.
-
-### step 2: download and install
+### step 1: download
 clone this repository and all its submodules to where you want to install. Please make sure the user(nobody) who run nginx worker has read and execute permission for this directory and **all of its parent directories**.
 ```
 git clone --recursive git@github.com:yanxurui/nq.git
 cd nq
 ```
-Before install, edit lua-cjson's Makefile
-```
-pushd deps/lua-cjson
-git apply ../cjson-diff.txt
-popd
-```
-execute INSTALL script
+
+### step 2: install nginx & lua libs
+execute INSTALL script (you should adjust it according to your needs)
 ```
 ./INSTALL.sh
 ```
+it does the following 3 things:
 
-### step 3: config
-`conf/nginx.conf` is configuration for nginx customised for this NQ and you are not supposed to modify it. **There can be only one worker process since nq uses semaphore to synchronize senders and receivers and furthermore nq is based on a lot of cache in lua level for the sake of performance**.
+1. install luajit2.1 to `/usr/local`
+2. compile nginx with the latest lua module(to be exact, v0.10.9 or later which requires luajit 2.1) and install it to `/opt/nginx`
+3. install dependencies(including compiling lua-cjson)
+
+### step 3: start nginx
+assume `/opt/nginx/sbin/nginx` is the nginx you install in step 1 and `/opt/nq` is where you clone this repo to in step 2.
+```
+/opt/nginx/sbin/nginx -p /opt/nq/
+```
+
+
+## Config
+`conf/nginx.conf` is configuration for nginx specialized for this program and you are not supposed to modify it except listen port(default is 8001). **There can be only one worker process since nq uses semaphore to synchronize senders and receivers and furthermore nq uses a lot of cache in lua level for the sake of performance**.
 
 `src/config.lua` is the global configuration you need to modify.
 The meaning of mysql configuration is obvious. First you need to create a database in mysql and then grant privilege to a user.
@@ -53,18 +58,17 @@ FLUSH PRIVILEGES;
 ```
 receiver configuration is described in [REST API](#PULL). This is the global configuration for all receivers.
 
-### step 4: start nginx
-```
-/opt/nginx/sbin/nginx -p /opt/nq/
-```
-assume `/opt/nginx/sbin/nginx` is the nginx you install in step 1 and `/opt/nq` is where you clone this repo to in step 2.
-
 
 ## Test
-Tests are written by python unittest.
+Tests are written using python unittest.
 
 ### install dependencies
-(you'd better do this in a python virtual envrionment created by `virtualenv`)
+MySQL-python requires mysql-devel, on CentOS:
+```
+yum install mysql-devel
+```
+
+install python packages(you'd better do this in a python virtual envrionment created by `virtualenv`)
 ```
 pip install -r requirements.txt
 ```
@@ -165,7 +169,7 @@ Below are all parameters and their meaning.
     * -1: return the last unconsumed message. If there is no available message, wait next message.
     * -2: ignore all messages that already exist and wait for new messages instead.
 
-  * **max**(optional, default:1): The max number of messages in this queue to return. The actual value depends on the number of available messages.
+  * **max**(optional, default:1): The max number of messages in this queue to return. The actual number of messages returned depends on the number of available messages.
 
   * **retry_num**(optional, default:2): the max number of retry times.
   * **fail_timeout**(optional, default:120): a time of seconds(float) after which a message is considered failed after it is received but not acknowledged. Details of retry_num and fail_timeout are described in [retry section](#Retry).
@@ -196,6 +200,6 @@ Note
 }
 ```
 Note
-1. `created_time` may be ommitted if the message is retrived from cache without querying myql.
+1. `created_time` may be missing if the message is retrived from cache without querying myql.
 
 
