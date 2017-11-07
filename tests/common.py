@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import time
 from time import time, sleep
+import shutil
 
 import requests
 import MySQLdb
@@ -19,6 +20,10 @@ monkey.patch_all()
 
 
 def reload_ngx():
+    logs = PREFIX + 'logs/'
+    if os.path.isdir(logs):
+        os.remove(logs + 'error.log')
+        os.remove(logs + 'access.log')
     cmd = [NGX_BIN, '-p', PREFIX]
     if os.path.isfile(PREFIX+'logs/nginx.pid'):
         cmd.extend(['-s', 'reload'])
@@ -96,6 +101,7 @@ class BaseTestCase(unittest.TestCase):
               queue: messages
             }
         }
+        s = Session()
         r = s.post('/post', json=data)
         self.assertEqual(r.status_code, 200)
         return r.json()[queue]
@@ -111,6 +117,7 @@ class BaseTestCase(unittest.TestCase):
               }
             }
         }
+        s = Session()
         r = s.post('/pull', json=data)
         self.assertEqual(r.status_code, 200)
         messages = r.json()['messages'][queue]
