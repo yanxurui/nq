@@ -1,7 +1,7 @@
 -- parse request, check params
 
 local cjson_safe = require "cjson.safe"
-local inspect = require 'inspect'
+-- local inspect = require 'inspect'
 
 local sender_cls = require 'sender'
 local receiver_cls = require 'receiver'
@@ -25,7 +25,7 @@ end
 
 if method == 'POST' then
     if request_uri == '/post' then
-        log(INFO, 'POST data: ', inspect(data))
+        -- print('POST data: ', inspect(data))
         local sender = data['sender']
         local messages = data['messages']
         if type(messages) ~= 'table' then
@@ -36,7 +36,7 @@ if method == 'POST' then
         local s = sender_cls.new(sender)
         status, res = s:post(messages)
     elseif request_uri == '/pull' then
-        log(INFO, 'PULL data: ', inspect(data))
+        -- print('PULL data: ', inspect(data))
         local receiver = data['receiver']
         if not receiver then
             status = ngx.HTTP_BAD_REQUEST

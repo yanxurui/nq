@@ -1,11 +1,12 @@
 local lrucache = require "resty.lrucache"
-local inspect = require "inspect"
+-- local inspect = require "inspect"
 local database = require "database"
 
 local log = ngx.log
 local ERR = ngx.ERR
 local WARN = ngx.WARN
 local INFO = ngx.INFO
+local DEBUG = ngx.DEBUG
 
 local _M = {}
 
@@ -39,7 +40,7 @@ function _M.get_last_id(queue, receiver)
     log(INFO, 'query last id of ', key)
     local sql
     if receiver then
-        sql = string.format("select max(m_id) from %s_rst where receiver=\'%s\'", queue, receiver)
+        sql = string.format("select max(m_id) from %s_rst where receiver='%s'", queue, receiver)
     else
         sql = string.format('select max(id) from %s_msg', queue)
     end
@@ -49,7 +50,7 @@ function _M.get_last_id(queue, receiver)
         return nil, 'failed to connect to mysql'
     end
     local res, err, errcode, sqlstate = db:query(sql)
-    log(INFO, 'query result: ', inspect(res))
+    -- print('res: ', inspect(res))
      
     local max
     if res then
@@ -107,7 +108,7 @@ local function get_processing_num(queue, receiver)
     local sql = string.format([[select count(*) from %s_rst
 where receiver='%s' and status='processing']], queue, receiver)
     local res, err, errcode, sqlstate = db:query(sql)
-    print(inspect(res))
+    -- print('res: ', inspect(res))
     local num
     if res then
         num = res[1]['count(*)']
@@ -131,7 +132,7 @@ end
 
 
 local function update_processing_num(queue, receiver, count)
-    local key = queue..receiver
+    local key = queue..'.'..receiver
     local old_num = cache_processing_num:get(key)
     if old_num then
         num = old_num + count
@@ -168,11 +169,11 @@ function _M.get_messages(queue, receiver, start, max, retry_num)
             -- 1. select from mysql if cache miss
             log(INFO, 'message #', id, ' miss, query message ', index)
             local sql = string.format('select * from %s_msg where id >= %d limit %d', queue, start, max)
-            log(INFO, 'sql: ', inspect(sql))
+            log(INFO, 'sql: ', sql)
             local err, errcode, sqlstate
             result, err, errcode, sqlstate = db:query(sql)
             assert(next(result))
-            print('res: ', inspect(result))
+            -- print('res: ', inspect(result))
             if not result then
                 log(ERR, "bad result: ", err, ": ", errcode, ": ", sqlstate, ".")
                 return 500, 'mysql error'
@@ -187,22 +188,22 @@ function _M.get_messages(queue, receiver, start, max, retry_num)
     local sql
     if retry_num > 0 then
         for i, message in ipairs(result) do
-            table.insert(values, string.format("(%d, \'%s\')", message['id'], receiver))
+            table.insert(values, string.format("(%d, '%s')", message['id'], receiver))
         end
         sql = string.format([[insert into %s_rst(m_id, receiver)
 values%s]], queue, table.concat(values, ','))
     else
         -- handle the special case when retry_num is 0
         for i, message in ipairs(result) do
-            table.insert(values, string.format("(%d, \'%s\', \'failed\')", message['id'], receiver))
+            table.insert(values, string.format("(%d, '%s', 'failed')", message['id'], receiver))
         end
         sql = string.format([[insert into %s_rst(m_id, receiver, status)
 values%s]], queue, table.concat(values, ','))
     end
-    log(INFO, 'sql: ', inspect(sql))
+    log(INFO, 'sql: ', sql)
 
     local res, err, errcode, sqlstate = db:query(sql)
-    print('res: ', inspect(res))
+    -- print('res: ', inspect(res))
     if not res then
         log(ERR, "bad result: ", err, ": ", errcode, ": ", sqlstate, ".")
         return 500, 'mysql error'
@@ -235,6 +236,7 @@ function _M.post_messages(queue, sender, messages)
     end
     local sql = string.format([[insert into %s_msg(sender, message) values%s]],
         queue, table.concat(values, ','))
+    log(DEBUG, sql)
     local flag = 0
     ::insert::
     flag = flag + 1
@@ -242,7 +244,7 @@ function _M.post_messages(queue, sender, messages)
         return 500, 'dead loop'
     end
     local res, err, errcode, sqlstate = db:query(sql)
-    print('res: ', inspect(res))
+    -- print('res: ', inspect(res))
     if not res then
         -- error code 1146 means "Message: Table '%s.%s' doesn't exist"
         if errcode == 1146 then
@@ -253,7 +255,7 @@ id INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
 sender VARCHAR(20) NOT NULL,
 created_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
 message MEDIUMBLOB NOT NULL
-);
+) ENGINE = MyISAM;
 create table %s_rst(
 m_id INT UNSIGNED,
 receiver VARCHAR(20) NOT NULL,
@@ -266,11 +268,11 @@ PRIMARY key(m_id, receiver),
 FOREIGN KEY(m_id) REFERENCES %s_msg(id),
 INDEX receiver_idx(receiver),
 INDEX status_idx(status)
-)
+) ENGINE = MyISAM
 ]]
             local create_sql = string.format(template, queue, queue, queue)
             local res, err, errcode, sqlstate = db:query(create_sql)
-            print('res: ', inspect(res))
+            -- print('res: ', inspect(res))
             if not res then
                 if errcode == 1050 then
                     log(INFO, err)
@@ -282,7 +284,7 @@ INDEX status_idx(status)
             end
             assert(err=='again')
             res, err, errcode, sqlstate = db:read_result(create_sql)
-            print('res: ', inspect(res))
+            -- print('res: ', inspect(res))
             if not res then
                 log(ERR, "failed to create result table: ", err, ": ", errcode, ": ", sqlstate, ".")
                 return 500, 'mysql error'
@@ -336,7 +338,7 @@ where m_id=%s and receiver='%s']], queue, result, id, receiver))
     local sql = table.concat(sqls, ';\n')
     print('sql: ', sql)
     local res, err, errcode, sqlstate = db:query(sql)
-    log(INFO, 'res: ', inspect(res))
+    -- print('res: ', inspect(res))
     if not res then
         log(ERR, "bad result #1: ", err, ": ", errcode, ": ", sqlstate, ".")
         return 500, 'mysql error'
@@ -345,7 +347,7 @@ where m_id=%s and receiver='%s']], queue, result, id, receiver))
     while err == "again" do
         i = i + 1
         res, err, errcode, sqlstate = db:read_result()
-        log(INFO, 'res: ', inspect(res))
+        -- print('res: ', inspect(res))
         if not res then
             ngx.log(ngx.ERR, "bad result #", i, ": ", err, ": ", errcode, ": ", sqlstate, ".")
             return 500, 'mysql error'
@@ -381,7 +383,7 @@ and
 limit %d]], queue, queue, queue, queue, receiver, queue, fail_timeout, fail_timeout, queue, queue, max)
     print(sql)
     local res, err, errcode, sqlstate = db:query(sql)
-    print('res: ', inspect(res))
+    -- print('res: ', inspect(res))
     if not res then
         log(ERR, "bad result: ", err, ": ", errcode, ": ", sqlstate, ".")
         return 500, 'mysql error'
@@ -421,7 +423,7 @@ where m_id=%s and receiver='%s']], queue, fail_count, r['id'], receiver))
     local sql = table.concat(sqls, ';\n')
     print('sql: ', sql)
     local res, err, errcode, sqlstate = db:query(sql)
-    log(INFO, 'res: ', inspect(res))
+    -- print('res: ', inspect(res))
     if not res then
         log(ERR, "bad result #1: ", err, ": ", errcode, ": ", sqlstate, ".")
         return 500, 'mysql error'
@@ -430,7 +432,7 @@ where m_id=%s and receiver='%s']], queue, fail_count, r['id'], receiver))
     while err == "again" do
         i = i + 1
         res, err, errcode, sqlstate = db:read_result()
-        log(INFO, 'res: ', inspect(res))
+        -- print('res: ', inspect(res))
         if not res then
             ngx.log(ngx.ERR, "bad result #", i, ": ", err, ": ", errcode, ": ", sqlstate, ".")
             return 500, 'mysql error'
