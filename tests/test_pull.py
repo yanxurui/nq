@@ -66,6 +66,7 @@ class TestPull(BaseTestCase):
         # ignore existing messages, wait for new message
         g1=gevent.spawn(self.pull, start=-2, max_count=3)
         gevent.idle()
+        sleep(.1) # in case pull is behind post
         self.assertEqual(self.post(['bar', 'baz']), [2,3])
         messages = g1.get()
         self.assertDictContainsSubset({'id':2,'message':'bar'}, messages[0])

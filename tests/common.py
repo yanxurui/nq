@@ -27,7 +27,10 @@ def reload_ngx():
         try:
             out = subprocess.check_output(cmd2, stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as exc:
-            print(out)
+            print('%d\nstderr: %s' % (exc.returncode, exc.output))
+            raise exc
+        else:
+            sleep(.1)
     # delete old logs
     logs = PREFIX + 'logs/'
     if os.path.isdir(logs):
