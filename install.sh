@@ -1,13 +1,14 @@
 set -e
 
-mkdir -p temp
-cd temp
+mkdir -p build
+cd build
 
 ### 1. install luajit2.1 to /usr/local ###
-wget -nc http://luajit.org/download/LuaJIT-2.1.0-beta2.tar.gz
-tar -xzf LuaJIT-2.1.0-beta2.tar.gz
-cd LuaJIT-2.1.0-beta2
-make
+## http://luajit.org/download.html
+wget -nc http://luajit.org/download/LuaJIT-2.1.0-beta3.tar.gz
+tar -xzf LuaJIT-2.1.0-beta3.tar.gz
+cd LuaJIT-2.1.0-beta3
+make CCDEBUG=-g
 make install
 export LUAJIT_LIB=/usr/local/lib
 export LUAJIT_INC=/usr/local/include/luajit-2.1
@@ -20,6 +21,7 @@ tar -xzf v0.3.0.tar.gz
 wget -nc https://github.com/openresty/lua-nginx-module/archive/v0.10.11.tar.gz
 tar -xzf v0.10.11.tar.gz
 
+# http://nginx.org/en/download.html
 wget -nc "http://nginx.org/download/nginx-1.13.6.tar.gz"
 tar -xzf nginx-1.13.6.tar.gz
 
@@ -47,14 +49,12 @@ cp -r deps/lua-resty-mysql/lib ./
 cp deps/inspect/inspect.lua ./lib/
 
 # compile and install lua-cjson
-mkdir -p clib
-
 pushd deps/lua-cjson
 cp Makefile Makefile.old
 git apply ../cjson-diff.txt
 make
 mv Makefile.old Makefile
 popd
-cp deps/lua-cjson/cjson.so ./clib/
+cp deps/lua-cjson/cjson.so ./lib/
 
 echo 'successfully'
