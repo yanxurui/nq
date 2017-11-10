@@ -103,6 +103,7 @@ class TestPull(BaseTestCase):
         
         # wait for new messages
         g=gevent.spawn(s.post, '/pull', json=data)
+        sleep(.05)
         gevent.idle()
 
         self.assertEqual(self.post(['fooo', 'baaa'], queue='queue1'), [3, 4])
