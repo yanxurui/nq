@@ -69,7 +69,7 @@ function _M.get(self, queues)
             end
             params['start'] = queue_last_id + 1
             listen(self, queue)
-            goto continue
+            goto wait
         end
         log(INFO, 'check ', queue, '.', self.name, ' for available messages')
         local next_id, available, err = has_next(self, queue, start)
@@ -142,6 +142,8 @@ function _M.get(self, queues)
     if next(messages) ~= nil then
         return 200, {messages=messages}
     end
+
+    ::wait::
 
     log(INFO, 'wait for new messages')
     assert(self.sem)
