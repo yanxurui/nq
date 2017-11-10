@@ -28,51 +28,6 @@ if not cache_message then
 end
 
 
-function _M.get_last_id(queue, receiver)
-    local key = receiver and queue..'.'..receiver or queue
-    log(INFO, key)
-    local last_id = cache_last_id:get(key)
-    if last_id then
-        hit = hit + 1
-        return last_id
-    end
-
-    log(INFO, 'query last id of ', key)
-    local sql
-    if receiver then
-        sql = string.format("select max(m_id) from %s_rst where receiver='%s'", queue, receiver)
-    else
-        sql = string.format('select max(id) from %s_msg', queue)
-    end
-
-    local db = database.connect()
-    if not db then
-        return nil, 'failed to connect to mysql'
-    end
-    local res, err, errcode, sqlstate = db:query(sql)
-    -- print('res: ', inspect(res))
-     
-    local max
-    if res then
-        max = res[1][receiver and 'max(m_id)' or 'max(id)']
-        if max == ngx.null then
-            -- there is no record in the table
-            max = 0
-        end
-    else
-        if errcode == 1146 then
-            -- Table doesn't exist
-            max = 0
-        else
-            log(ERR, "bad result: ", err, ": ", errcode, ": ", sqlstate, ".")
-            return nil, 'mysql error' -- can not be replaced by only `return`
-        end
-    end
-    cache_last_id:set(key, max, ttl)
-    miss = miss + 1
-    return max
-end
-
 local function set_last_id(queue, receiver, last_id, count)
     local key = receiver and queue..'.'..receiver or queue
     log(INFO, key, ':', last_id, ',', count)
@@ -81,52 +36,92 @@ local function set_last_id(queue, receiver, last_id, count)
         -- compute according to insert_id and affected_rows
         last_id = last_id + count - 1
     end
-    if old_last_id then
-        if receiver then
-            assert(last_id>old_last_id)
-        elseif last_id<=old_last_id then
-            return
-        end
+    if old_last_id and last_id<=old_last_id then
+        return
     end
     cache_last_id:set(key, last_id, ttl)
 end
 
 
+function _M.get_last_id(queue, receiver)
+    local key = receiver and queue..'.'..receiver or queue
+    local last_id = cache_last_id:get(key)
+    if last_id then
+        hit = hit + 1
+    else
+        log(INFO, 'query last id of ', key)
+        local sql
+        if receiver then
+            sql = string.format("select max(m_id) from %s_rst where receiver='%s'", queue, receiver)
+        else
+            sql = string.format('select max(id) from %s_msg', queue)
+        end
+
+        local db = database.connect()
+        if not db then
+            return nil, 'failed to connect to mysql'
+        end
+        local res, err, errcode, sqlstate = db:query(sql)
+        -- print('res: ', inspect(res))
+
+        if res then
+            last_id = res[1][receiver and 'max(m_id)' or 'max(id)']
+            if last_id == ngx.null then
+                -- there is no record in the table
+                last_id = 0
+            end
+        else
+            if errcode == 1146 then
+                -- Table doesn't exist
+                last_id = 0
+            else
+                log(ERR, "bad result: ", err, ": ", errcode, ": ", sqlstate, ".")
+                return nil, 'mysql error' -- can not be replaced by only `return`
+            end
+        end
+        -- in case someone else has set the last id ahead
+        set_last_id(queue, receiver, last_id)
+        miss = miss + 1
+    end
+    log(INFO, key, ':', last_id)
+    return last_id
+end
+
+
 local function get_processing_num(queue, receiver)
     local key = queue..'.'..receiver
-    log(INFO, key)
     local num = cache_processing_num:get(key)
     if num then
         hit = hit + 1
-        return num
-    end
-    log(INFO, 'query processing number of ', key)
-    local db = database.connect()
-    if not db then
-        return nil, 'failed to connect to mysql'
-    end
-    local sql = string.format([[select count(*) from %s_rst
-where receiver='%s' and status='processing']], queue, receiver)
-    local res, err, errcode, sqlstate = db:query(sql)
-    -- print('res: ', inspect(res))
-    local num
-    if res then
-        num = res[1]['count(*)']
-        if num == ngx.null then
-            num = 0
-        else
-            num = tonumber(num)
-        end
     else
-        if errcode == 1146 then
-            num = 0
-        else
-            log(ERR, "bad result: ", err, ": ", errcode, ": ", sqlstate, ".")
-            return nil, 'mysql error'
+        log(INFO, 'query processing number of ', key)
+        local db = database.connect()
+        if not db then
+            return nil, 'failed to connect to mysql'
         end
+        local sql = string.format([[select count(*) from %s_rst
+    where receiver='%s' and status='processing']], queue, receiver)
+        local res, err, errcode, sqlstate = db:query(sql)
+        -- print('res: ', inspect(res))
+        if res then
+            num = res[1]['count(*)']
+            if num == ngx.null then
+                num = 0
+            else
+                num = tonumber(num)
+            end
+        else
+            if errcode == 1146 then
+                num = 0
+            else
+                log(ERR, "bad result: ", err, ": ", errcode, ": ", sqlstate, ".")
+                return nil, 'mysql error'
+            end
+        end
+        cache_processing_num:set(key, num)
+        miss = miss + 1
     end
-    cache_processing_num:set(key, num)
-    miss = miss + 1
+    log(INFO, key, ':', num)
     return num
 end
 
@@ -147,14 +142,21 @@ local function set_messages(queue, messages)
     end
 end
 
+local function concat_rec(t, sep)
+    for i, v in ipairs(t) do
+        if type(v) == "table" then
+            t[i] = concat_rec(v, sep)
+        end
+    end
+    return table.concat(t, sep)
+end
 
 function _M.get_messages(queue, receiver, start, max, retry_num)
     assert(start>=0)
     assert(max>=1)
 
     local result = {}
-    local index = string.format('%s:%d,%d', queue, start, max)
-    log(INFO, index)
+    log(INFO, queue, ':', start, ',', max)
 
     local db = database.connect()
     if not db then
@@ -167,9 +169,9 @@ function _M.get_messages(queue, receiver, start, max, retry_num)
             table.insert(result, message)
         else
             -- 1. select from mysql if cache miss
-            log(INFO, 'message #', id, ' miss, query message ', index)
-            local sql = string.format('select * from %s_msg where id >= %d limit %d', queue, start, max)
-            log(INFO, 'sql: ', sql)
+            log(INFO, 'message #', id, ' miss')
+            local sql = {'select * from ', queue, '_msg where id>=', tostring(start), ' limit ', tostring(max)}
+            -- print('sql: ', concat_rec(sql))
             local err, errcode, sqlstate
             result, err, errcode, sqlstate = db:query(sql)
             assert(next(result))
@@ -190,17 +192,15 @@ function _M.get_messages(queue, receiver, start, max, retry_num)
         for i, message in ipairs(result) do
             table.insert(values, string.format("(%d, '%s')", message['id'], receiver))
         end
-        sql = string.format([[insert into %s_rst(m_id, receiver)
-values%s]], queue, table.concat(values, ','))
+        sql = {'insert into ', queue, '_rst(m_id, receiver) values', table.concat(values, ',')}
     else
         -- handle the special case when retry_num is 0
         for i, message in ipairs(result) do
             table.insert(values, string.format("(%d, '%s', 'failed')", message['id'], receiver))
         end
-        sql = string.format([[insert into %s_rst(m_id, receiver, status)
-values%s]], queue, table.concat(values, ','))
+        sql ={'insert into ', queue, '_rst(m_id, receiver, status) values', table.concat(values, ',')}
     end
-    log(INFO, 'sql: ', sql)
+    -- print('sql: ', concat_rec(sql))
 
     local res, err, errcode, sqlstate = db:query(sql)
     -- print('res: ', inspect(res))
