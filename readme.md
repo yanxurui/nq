@@ -4,7 +4,7 @@ As most message brokers do, NQ can work as a FIFO queue or PUB/SUB pattern.
 NQ is not only a message broker, it persists messages in mysql as well as receiver's processing time and result.
 
 
-## Advantages
+### advantages
 * simple but powerful, easy to use&monitor
 * unacknowledged messages will be retried until failed
 * support common patterns: pub/sub, producers and consumers, delayed or distributed jobs
@@ -12,12 +12,12 @@ NQ is not only a message broker, it persists messages in mysql as well as receiv
 * http REST api: client can use most existing tools. also easy to debug
 * well tested
 
+### comparision with other mq
+* rabbitmq is the right choice in most cases. But  it can not save processing results and it's impossible to track a message in rabbitmq. And also AMQP protocol is complicated.
+* redis comes with pub/sub function, but messages are transient, a receiver can not get messages published when it is disconnected
+* zeromq is extremely fast, but it doesn't support persistence.
 
-## Retry
-A `processing` job will be retried after `fail_timeout` seconds unless it an acknowledgement is received or exceeds `retry_num`. Retry happen in a lazy mode instead of as soon as possible. A receiver can only get retry tasks when there is no new messages available for this receiver.
-
-A job is considered failed if it is retried `retry_num` times which is reflected by the value of `fail_count` field in result table.
-If the param `retry_num` is set to 0, the status of a message will become failed the moment it is retrieved until it is acknowledged later. This may be kind of confused at first.
+NQ is not meant to be a replacement of these  awesome message systems. It's just a better alternative in some specific application scenario when reliable delivery of messages is more important than performance and message processing results need to be collected for future inquiries sometimes. Besides, it's simpler, which means it's easier to use, debug and monitor.
 
 
 ## Install
@@ -28,7 +28,9 @@ git clone --recursive git@github.com:yanxurui/nq.git
 cd nq
 ```
 
-### step 2: install nginx & lua libs
+### step 2: manully install nginx & lua libs
+skip this step if you are using openresty.
+
 execute INSTALL script (you should adjust it according to your needs)
 ```
 ./INSTALL.sh
@@ -40,9 +42,14 @@ it does the following 3 things:
 3. install dependencies(including compiling lua-cjson)
 
 ### step 3: start nginx
-assume `/opt/nginx/sbin/nginx` is the nginx you install in step 1 and `/opt/nq` is where you clone this repo to in step 2.
+if you use openresty
+assume `/opt/nginx/sbin/nginx` is the nginx you install in step 2 and `/opt/nq` is where you clone this repo to in step 2.
 ```
 /opt/nginx/sbin/nginx -p /opt/nq/
+```
+or if you use openresty
+```
+openresty -p /opt/nq/
 ```
 
 
@@ -80,6 +87,13 @@ Create a database nq_test for the purpose of test. Change `tests/config.lua` and
 ```
 python -m unittest discover -v
 ```
+
+
+## Retry mechanism
+A `processing` job will be retried after `fail_timeout` seconds unless it an acknowledgement is received or exceeds `retry_num`. Retry happen in a lazy mode instead of as soon as possible. A receiver can only get retry tasks when there is no new messages available for this receiver.
+
+A job is considered failed if it is retried `retry_num` times which is reflected by the value of `fail_count` field in result table.
+If the param `retry_num` is set to 0, the status of a message will become failed the moment it is retrieved until it is acknowledged later. This may be kind of confused at first.
 
 
 ## REST API
@@ -162,7 +176,7 @@ POST /pull
 **queues**: a dict with queue name as key and a dict of optional params as value.
 Below are all parameters and their meaning.
 
-  * **start**(optional, defailt:0): A message id(starts from 1) from where to retrieve the message. **NQ makes sure all messages are delivered in the order they are enqueued and the same receiver will never get messages repeatedly**. Thus if a message has already been delivered to the same worker, all messages before it including itself will not be delivered again though start is less than the id of that message.
+  * **start**(optional, default:0): A message id(starts from 1) from where to retrieve the message. **NQ makes sure all messages are delivered in the order they are enqueued and the same receiver will never get messages repeatedly**. Thus if a message has already been delivered to the same worker, all messages before it including itself will not be delivered again though start is less than the id of that message.
 
     There are 3 special values:
     * 0: The default value is 0, which indicates restore from the last received message. It will retrieve messages from the beginning of the queue if this receiver has not pulled any message before.

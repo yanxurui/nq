@@ -4,11 +4,12 @@ mkdir -p build
 cd build
 
 ### 1. install luajit2.1 to /usr/local ###
-## http://luajit.org/download.html
+# http://luajit.org/download.html
+# use -nc to skip escape downloading repeatedly
 wget -nc http://luajit.org/download/LuaJIT-2.1.0-beta3.tar.gz
 tar -xzf LuaJIT-2.1.0-beta3.tar.gz
 cd LuaJIT-2.1.0-beta3
-make CCDEBUG=-g
+make
 make install
 export LUAJIT_LIB=/usr/local/lib
 export LUAJIT_INC=/usr/local/include/luajit-2.1
