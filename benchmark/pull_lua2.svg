@@ -1,0 +1,978 @@
+<?xml version="1.0" encoding="ISO-8859-1" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" width="1200" height="214" onload="init(evt)" viewBox="0 0 1200 214" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<!-- Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples. -->
+<!-- NOTES:  -->
+<defs >
+	<linearGradient id="background" y1="0" y2="1" x1="0" x2="0" >
+		<stop stop-color="#eeeeee" offset="5%" />
+		<stop stop-color="#eeeeb0" offset="95%" />
+	</linearGradient>
+</defs>
+<style type="text/css">
+	.func_g:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+</style>
+<script type="text/ecmascript">
+<![CDATA[
+	var details, searchbtn, matchedtxt, svg;
+	function init(evt) {
+		details = document.getElementById("details").firstChild;
+		searchbtn = document.getElementById("search");
+		matchedtxt = document.getElementById("matched");
+		svg = document.getElementsByTagName("svg")[0];
+		searching = 0;
+	}
+
+	// mouse-over for info
+	function s(node) {		// show
+		info = g_to_text(node);
+		details.nodeValue = "Function: " + info;
+	}
+	function c() {			// clear
+		details.nodeValue = ' ';
+	}
+
+	// ctrl-F for search
+	window.addEventListener("keydown",function (e) {
+		if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+			e.preventDefault();
+			search_prompt();
+		}
+	})
+
+	// functions
+	function find_child(parent, name, attr) {
+		var children = parent.childNodes;
+		for (var i=0; i<children.length;i++) {
+			if (children[i].tagName == name)
+				return (attr != undefined) ? children[i].attributes[attr].value : children[i];
+		}
+		return;
+	}
+	function orig_save(e, attr, val) {
+		if (e.attributes["_orig_"+attr] != undefined) return;
+		if (e.attributes[attr] == undefined) return;
+		if (val == undefined) val = e.attributes[attr].value;
+		e.setAttribute("_orig_"+attr, val);
+	}
+	function orig_load(e, attr) {
+		if (e.attributes["_orig_"+attr] == undefined) return;
+		e.attributes[attr].value = e.attributes["_orig_"+attr].value;
+		e.removeAttribute("_orig_"+attr);
+	}
+	function g_to_text(e) {
+		var text = find_child(e, "title").firstChild.nodeValue;
+		return (text)
+	}
+	function g_to_func(e) {
+		var func = g_to_text(e);
+		// if there's any manipulation we want to do to the function
+		// name before it's searched, do it here before returning.
+		return (func);
+	}
+	function update_text(e) {
+		var r = find_child(e, "rect");
+		var t = find_child(e, "text");
+		var w = parseFloat(r.attributes["width"].value) -3;
+		var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+		t.attributes["x"].value = parseFloat(r.attributes["x"].value) +3;
+
+		// Smaller than this size won't fit anything
+		if (w < 2*12*0.59) {
+			t.textContent = "";
+			return;
+		}
+
+		t.textContent = txt;
+		// Fit in full text width
+		if (/^ *$/.test(txt) || t.getSubStringLength(0, txt.length) < w)
+			return;
+
+		for (var x=txt.length-2; x>0; x--) {
+			if (t.getSubStringLength(0, x+2) <= w) {
+				t.textContent = txt.substring(0,x) + "..";
+				return;
+			}
+		}
+		t.textContent = "";
+	}
+
+	// zoom
+	function zoom_reset(e) {
+		if (e.attributes != undefined) {
+			orig_load(e, "x");
+			orig_load(e, "width");
+		}
+		if (e.childNodes == undefined) return;
+		for(var i=0, c=e.childNodes; i<c.length; i++) {
+			zoom_reset(c[i]);
+		}
+	}
+	function zoom_child(e, x, ratio) {
+		if (e.attributes != undefined) {
+			if (e.attributes["x"] != undefined) {
+				orig_save(e, "x");
+				e.attributes["x"].value = (parseFloat(e.attributes["x"].value) - x - 10) * ratio + 10;
+				if(e.tagName == "text") e.attributes["x"].value = find_child(e.parentNode, "rect", "x") + 3;
+			}
+			if (e.attributes["width"] != undefined) {
+				orig_save(e, "width");
+				e.attributes["width"].value = parseFloat(e.attributes["width"].value) * ratio;
+			}
+		}
+
+		if (e.childNodes == undefined) return;
+		for(var i=0, c=e.childNodes; i<c.length; i++) {
+			zoom_child(c[i], x-10, ratio);
+		}
+	}
+	function zoom_parent(e) {
+		if (e.attributes) {
+			if (e.attributes["x"] != undefined) {
+				orig_save(e, "x");
+				e.attributes["x"].value = 10;
+			}
+			if (e.attributes["width"] != undefined) {
+				orig_save(e, "width");
+				e.attributes["width"].value = parseInt(svg.width.baseVal.value) - (10*2);
+			}
+		}
+		if (e.childNodes == undefined) return;
+		for(var i=0, c=e.childNodes; i<c.length; i++) {
+			zoom_parent(c[i]);
+		}
+	}
+	function zoom(node) {
+		var attr = find_child(node, "rect").attributes;
+		var width = parseFloat(attr["width"].value);
+		var xmin = parseFloat(attr["x"].value);
+		var xmax = parseFloat(xmin + width);
+		var ymin = parseFloat(attr["y"].value);
+		var ratio = (svg.width.baseVal.value - 2*10) / width;
+
+		// XXX: Workaround for JavaScript float issues (fix me)
+		var fudge = 0.0001;
+
+		var unzoombtn = document.getElementById("unzoom");
+		unzoombtn.style["opacity"] = "1.0";
+
+		var el = document.getElementsByTagName("g");
+		for(var i=0;i<el.length;i++){
+			var e = el[i];
+			var a = find_child(e, "rect").attributes;
+			var ex = parseFloat(a["x"].value);
+			var ew = parseFloat(a["width"].value);
+			// Is it an ancestor
+			if (0 == 0) {
+				var upstack = parseFloat(a["y"].value) > ymin;
+			} else {
+				var upstack = parseFloat(a["y"].value) < ymin;
+			}
+			if (upstack) {
+				// Direct ancestor
+				if (ex <= xmin && (ex+ew+fudge) >= xmax) {
+					e.style["opacity"] = "0.5";
+					zoom_parent(e);
+					e.onclick = function(e){unzoom(); zoom(this);};
+					update_text(e);
+				}
+				// not in current path
+				else
+					e.style["display"] = "none";
+			}
+			// Children maybe
+			else {
+				// no common path
+				if (ex < xmin || ex + fudge >= xmax) {
+					e.style["display"] = "none";
+				}
+				else {
+					zoom_child(e, xmin, ratio);
+					e.onclick = function(e){zoom(this);};
+					update_text(e);
+				}
+			}
+		}
+	}
+	function unzoom() {
+		var unzoombtn = document.getElementById("unzoom");
+		unzoombtn.style["opacity"] = "0.0";
+
+		var el = document.getElementsByTagName("g");
+		for(i=0;i<el.length;i++) {
+			el[i].style["display"] = "block";
+			el[i].style["opacity"] = "1";
+			zoom_reset(el[i]);
+			update_text(el[i]);
+		}
+	}
+
+	// search
+	function reset_search() {
+		var el = document.getElementsByTagName("rect");
+		for (var i=0; i < el.length; i++) {
+			orig_load(el[i], "fill")
+		}
+	}
+	function search_prompt() {
+		if (!searching) {
+			var term = prompt("Enter a search term (regexp " +
+			    "allowed, eg: ^ext4_)", "");
+			if (term != null) {
+				search(term)
+			}
+		} else {
+			reset_search();
+			searching = 0;
+			searchbtn.style["opacity"] = "0.1";
+			searchbtn.firstChild.nodeValue = "Search"
+			matchedtxt.style["opacity"] = "0.0";
+			matchedtxt.firstChild.nodeValue = ""
+		}
+	}
+	function search(term) {
+		var re = new RegExp(term);
+		var el = document.getElementsByTagName("g");
+		var matches = new Object();
+		var maxwidth = 0;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			if (e.attributes["class"].value != "func_g")
+				continue;
+			var func = g_to_func(e);
+			var rect = find_child(e, "rect");
+			if (rect == null) {
+				// the rect might be wrapped in an anchor
+				// if nameattr href is being used
+				if (rect = find_child(e, "a")) {
+				    rect = find_child(r, "rect");
+				}
+			}
+			if (func == null || rect == null)
+				continue;
+
+			// Save max width. Only works as we have a root frame
+			var w = parseFloat(rect.attributes["width"].value);
+			if (w > maxwidth)
+				maxwidth = w;
+
+			if (func.match(re)) {
+				// highlight
+				var x = parseFloat(rect.attributes["x"].value);
+				orig_save(rect, "fill");
+				rect.attributes["fill"].value =
+				    "rgb(230,0,230)";
+
+				// remember matches
+				if (matches[x] == undefined) {
+					matches[x] = w;
+				} else {
+					if (w > matches[x]) {
+						// overwrite with parent
+						matches[x] = w;
+					}
+				}
+				searching = 1;
+			}
+		}
+		if (!searching)
+			return;
+
+		searchbtn.style["opacity"] = "1.0";
+		searchbtn.firstChild.nodeValue = "Reset Search"
+
+		// calculate percent matched, excluding vertical overlap
+		var count = 0;
+		var lastx = -1;
+		var lastw = 0;
+		var keys = Array();
+		for (k in matches) {
+			if (matches.hasOwnProperty(k))
+				keys.push(k);
+		}
+		// sort the matched frames by their x location
+		// ascending, then width descending
+		keys.sort(function(a, b){
+			return a - b;
+		});
+		// Step through frames saving only the biggest bottom-up frames
+		// thanks to the sort order. This relies on the tree property
+		// where children are always smaller than their parents.
+		var fudge = 0.0001;	// JavaScript floating point
+		for (var k in keys) {
+			var x = parseFloat(keys[k]);
+			var w = matches[keys[k]];
+			if (x >= lastx + lastw - fudge) {
+				count += w;
+				lastx = x;
+				lastw = w;
+			}
+		}
+		// display matched percent
+		matchedtxt.style["opacity"] = "1.0";
+		pct = 100 * count / maxwidth;
+		if (pct == 100)
+			pct = "100"
+		else
+			pct = pct.toFixed(1)
+		matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+	}
+	function searchover(e) {
+		searchbtn.style["opacity"] = "1.0";
+	}
+	function searchout(e) {
+		if (searching) {
+			searchbtn.style["opacity"] = "1.0";
+		} else {
+			searchbtn.style["opacity"] = "0.1";
+		}
+	}
+]]>
+</script>
+<rect x="0.0" y="0" width="1200.0" height="214.0" fill="url(#background)"  />
+<text text-anchor="middle" x="600.00" y="24" font-size="17" font-family="Verdana" fill="rgb(0,0,0)"  >Lua-land on-CPU flamegraph</text>
+<text text-anchor="" x="10.00" y="197" font-size="12" font-family="Verdana" fill="rgb(0,0,0)" id="details" > </text>
+<text text-anchor="" x="10.00" y="24" font-size="12" font-family="Verdana" fill="rgb(0,0,0)" id="unzoom" onclick="unzoom()" style="opacity:0.0;cursor:pointer" >Reset Zoom</text>
+<text text-anchor="" x="1090.00" y="24" font-size="12" font-family="Verdana" fill="rgb(0,0,0)" id="search" onmouseover="searchover()" onmouseout="searchout()" onclick="search_prompt()" style="opacity:0.1;cursor:pointer" >Search</text>
+<text text-anchor="" x="1090.00" y="197" font-size="12" font-family="Verdana" fill="rgb(0,0,0)" id="matched" > </text>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>start_callback (3 samples, 0.49%)</title><rect x="1155.6" y="53" width="5.8" height="15.0" fill="rgb(246,29,28)" rx="2" ry="2" />
+<text text-anchor="" x="1158.63" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>recv (9 samples, 1.46%)</title><rect x="1130.8" y="53" width="17.2" height="15.0" fill="rgb(235,18,34)" rx="2" ry="2" />
+<text text-anchor="" x="1133.81" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>__do_softirq (4 samples, 0.65%)</title><rect x="405.2" y="53" width="7.7" height="15.0" fill="rgb(220,50,31)" rx="2" ry="2" />
+<text text-anchor="" x="408.24" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>C:ngx_http_lua_socket_tcp_setkeepalive (8 samples, 1.29%)</title><rect x="302.1" y="85" width="15.3" height="15.0" fill="rgb(208,70,17)" rx="2" ry="2" />
+<text text-anchor="" x="305.14" y="95.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lj_str_new (3 samples, 0.49%)</title><rect x="281.1" y="53" width="5.8" height="15.0" fill="rgb(209,157,46)" rx="2" ry="2" />
+<text text-anchor="" x="284.13" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_init (7 samples, 1.13%)</title><rect x="447.2" y="53" width="13.4" height="15.0" fill="rgb(242,178,54)" rx="2" ry="2" />
+<text text-anchor="" x="450.25" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_init (4 samples, 0.65%)</title><rect x="903.6" y="53" width="7.6" height="15.0" fill="rgb(253,115,32)" rx="2" ry="2" />
+<text text-anchor="" x="906.59" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lj_cf_string_format (6 samples, 0.97%)</title><rect x="218.1" y="85" width="11.5" height="15.0" fill="rgb(250,62,23)" rx="2" ry="2" />
+<text text-anchor="" x="221.12" y="95.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ip_queue_xmit (3 samples, 0.49%)</title><rect x="622.9" y="53" width="5.7" height="15.0" fill="rgb(215,58,11)" rx="2" ry="2" />
+<text text-anchor="" x="625.91" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lj_BC_TGETS (3 samples, 0.49%)</title><rect x="330.8" y="101" width="5.7" height="15.0" fill="rgb(250,215,16)" rx="2" ry="2" />
+<text text-anchor="" x="333.78" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ngx_http_lua_run_thread (6 samples, 0.97%)</title><rect x="1092.6" y="53" width="11.5" height="15.0" fill="rgb(223,229,34)" rx="2" ry="2" />
+<text text-anchor="" x="1095.62" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lj_cont_stitch (3 samples, 0.49%)</title><rect x="76.8" y="117" width="5.8" height="15.0" fill="rgb(233,85,37)" rx="2" ry="2" />
+<text text-anchor="" x="79.83" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>C:ngx_http_lua_socket_tcp_connect (9 samples, 1.46%)</title><rect x="235.3" y="69" width="17.2" height="15.0" fill="rgb(221,47,12)" rx="2" ry="2" />
+<text text-anchor="" x="238.31" y="79.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ngx_http_header_filter (3 samples, 0.49%)</title><rect x="95.9" y="117" width="5.8" height="15.0" fill="rgb(229,221,1)" rx="2" ry="2" />
+<text text-anchor="" x="98.92" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tcp_v4_rcv (3 samples, 0.49%)</title><rect x="838.7" y="53" width="5.7" height="15.0" fill="rgb(210,213,43)" rx="2" ry="2" />
+<text text-anchor="" x="841.67" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lj_alloc_malloc (3 samples, 0.49%)</title><rect x="235.3" y="53" width="5.7" height="15.0" fill="rgb(244,61,10)" rx="2" ry="2" />
+<text text-anchor="" x="238.31" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lj_tab_free (3 samples, 0.49%)</title><rect x="212.4" y="117" width="5.7" height="15.0" fill="rgb(231,39,15)" rx="2" ry="2" />
+<text text-anchor="" x="215.39" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ngx_epoll_process_events (4 samples, 0.65%)</title><rect x="1073.5" y="53" width="7.7" height="15.0" fill="rgb(227,63,19)" rx="2" ry="2" />
+<text text-anchor="" x="1076.53" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>resty.mysql:_send_packet (3 samples, 0.49%)</title><rect x="853.9" y="69" width="5.8" height="15.0" fill="rgb(207,4,41)" rx="2" ry="2" />
+<text text-anchor="" x="856.95" y="79.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>C:lj_cf_package_require (6 samples, 0.97%)</title><rect x="76.8" y="133" width="11.5" height="15.0" fill="rgb(230,169,35)" rx="2" ry="2" />
+<text text-anchor="" x="79.83" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>index2adr (7 samples, 1.13%)</title><rect x="609.5" y="53" width="13.4" height="15.0" fill="rgb(237,134,34)" rx="2" ry="2" />
+<text text-anchor="" x="612.55" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lua_concat (3 samples, 0.49%)</title><rect x="1046.8" y="53" width="5.7" height="15.0" fill="rgb(229,181,4)" rx="2" ry="2" />
+<text text-anchor="" x="1049.80" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>__inet_lookup_established (3 samples, 0.49%)</title><rect x="412.9" y="53" width="5.7" height="15.0" fill="rgb(222,172,38)" rx="2" ry="2" />
+<text text-anchor="" x="415.88" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>C:ngx_http_lua_socket_tcp_receive (23 samples, 3.72%)</title><rect x="859.7" y="53" width="43.9" height="15.0" fill="rgb(254,60,39)" rx="2" ry="2" />
+<text text-anchor="" x="862.68" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >C:ng..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ngx_http_lua_socket_send (3 samples, 0.49%)</title><rect x="727.9" y="53" width="5.8" height="15.0" fill="rgb(242,93,15)" rx="2" ry="2" />
+<text text-anchor="" x="730.93" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ngx_http_core_content_phase (3 samples, 0.49%)</title><rect x="1086.9" y="53" width="5.7" height="15.0" fill="rgb(212,44,37)" rx="2" ry="2" />
+<text text-anchor="" x="1089.89" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>kmem_cache_alloc_node_trace (5 samples, 0.81%)</title><rect x="628.6" y="53" width="9.6" height="15.0" fill="rgb(222,9,44)" rx="2" ry="2" />
+<text text-anchor="" x="631.64" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ngx_http_lua_socket_tcp_resume_helper (4 samples, 0.65%)</title><rect x="1123.2" y="53" width="7.6" height="15.0" fill="rgb(247,215,11)" rx="2" ry="2" />
+<text text-anchor="" x="1126.17" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>T:message.lua:set_messages (3 samples, 0.49%)</title><rect x="351.8" y="85" width="5.7" height="15.0" fill="rgb(226,164,1)" rx="2" ry="2" />
+<text text-anchor="" x="354.78" y="95.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>C:json_decode (22 samples, 3.56%)</title><rect x="10.0" y="117" width="42.0" height="15.0" fill="rgb(249,219,24)" rx="2" ry="2" />
+<text text-anchor="" x="13.00" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >C:j..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ngx_http_lua_socket_tcp_receive (4 samples, 0.65%)</title><rect x="1109.8" y="53" width="7.6" height="15.0" fill="rgb(223,30,35)" rx="2" ry="2" />
+<text text-anchor="" x="1112.81" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>__netif_receive_skb (4 samples, 0.65%)</title><rect x="424.3" y="53" width="7.7" height="15.0" fill="rgb(211,175,43)" rx="2" ry="2" />
+<text text-anchor="" x="427.34" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ngx_http_lua_socket_tcp_connect (6 samples, 0.97%)</title><rect x="241.0" y="53" width="11.5" height="15.0" fill="rgb(235,75,14)" rx="2" ry="2" />
+<text text-anchor="" x="244.04" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>message.lua:_M.get_messages (8 samples, 1.29%)</title><rect x="336.5" y="101" width="15.3" height="15.0" fill="rgb(208,225,51)" rx="2" ry="2" />
+<text text-anchor="" x="339.50" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lj_BC_GGET (3 samples, 0.49%)</title><rect x="185.7" y="117" width="5.7" height="15.0" fill="rgb(231,213,35)" rx="2" ry="2" />
+<text text-anchor="" x="188.66" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>resty.mysql:_M.connect (32 samples, 5.18%)</title><rect x="235.3" y="85" width="61.1" height="15.0" fill="rgb(217,182,15)" rx="2" ry="2" />
+<text text-anchor="" x="238.31" y="95.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >resty...</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tcp_sendmsg (4 samples, 0.65%)</title><rect x="823.4" y="53" width="7.6" height="15.0" fill="rgb(243,38,15)" rx="2" ry="2" />
+<text text-anchor="" x="826.40" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tcp_rcv_established (4 samples, 0.65%)</title><rect x="810.0" y="53" width="7.7" height="15.0" fill="rgb(233,17,21)" rx="2" ry="2" />
+<text text-anchor="" x="813.03" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tcp_event_data_recv (3 samples, 0.49%)</title><rect x="796.7" y="53" width="5.7" height="15.0" fill="rgb(222,88,22)" rx="2" ry="2" />
+<text text-anchor="" x="799.67" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>current_kernel_time (3 samples, 0.49%)</title><rect x="976.1" y="53" width="5.8" height="15.0" fill="rgb(218,120,54)" rx="2" ry="2" />
+<text text-anchor="" x="979.15" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ngx_palloc (3 samples, 0.49%)</title><rect x="107.4" y="117" width="5.7" height="15.0" fill="rgb(205,63,33)" rx="2" ry="2" />
+<text text-anchor="" x="110.38" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>dev_queue_xmit (5 samples, 0.81%)</title><rect x="588.5" y="53" width="9.6" height="15.0" fill="rgb(234,82,18)" rx="2" ry="2" />
+<text text-anchor="" x="591.54" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lj_BC_CALL (4 samples, 0.65%)</title><rect x="323.1" y="101" width="7.7" height="15.0" fill="rgb(215,116,29)" rx="2" ry="2" />
+<text text-anchor="" x="326.14" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>json_next_token (5 samples, 0.81%)</title><rect x="19.5" y="101" width="9.6" height="15.0" fill="rgb(219,149,40)" rx="2" ry="2" />
+<text text-anchor="" x="22.55" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>__mpn_divrem (3 samples, 0.49%)</title><rect x="59.6" y="101" width="5.8" height="15.0" fill="rgb(247,198,48)" rx="2" ry="2" />
+<text text-anchor="" x="62.64" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>T:resty.mysql:_M.new (3 samples, 0.49%)</title><rect x="296.4" y="69" width="5.7" height="15.0" fill="rgb(222,19,33)" rx="2" ry="2" />
+<text text-anchor="" x="299.41" y="79.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>message.lua:_M.get_last_id (3 samples, 0.49%)</title><rect x="1184.3" y="101" width="5.7" height="15.0" fill="rgb(222,103,19)" rx="2" ry="2" />
+<text text-anchor="" x="1187.27" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>get_page (3 samples, 0.49%)</title><rect x="603.8" y="53" width="5.7" height="15.0" fill="rgb(216,134,14)" rx="2" ry="2" />
+<text text-anchor="" x="606.82" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lj_alloc_free (4 samples, 0.65%)</title><rect x="871.1" y="37" width="7.7" height="15.0" fill="rgb(235,76,21)" rx="2" ry="2" />
+<text text-anchor="" x="874.13" y="47.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>builtin#91 (3 samples, 0.49%)</title><rect x="229.6" y="101" width="5.7" height="15.0" fill="rgb(242,63,11)" rx="2" ry="2" />
+<text text-anchor="" x="232.58" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>resty.mysql:_recv_packet (23 samples, 3.72%)</title><rect x="859.7" y="69" width="43.9" height="15.0" fill="rgb(247,42,0)" rx="2" ry="2" />
+<text text-anchor="" x="862.68" y="79.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >rest..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>memcpy (3 samples, 0.49%)</title><rect x="680.2" y="53" width="5.7" height="15.0" fill="rgb(241,143,35)" rx="2" ry="2" />
+<text text-anchor="" x="683.19" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lj_str_new (21 samples, 3.40%)</title><rect x="1001.0" y="53" width="40.1" height="15.0" fill="rgb(206,18,26)" rx="2" ry="2" />
+<text text-anchor="" x="1003.97" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >lj_..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>propagatemark (8 samples, 1.29%)</title><rect x="265.9" y="69" width="15.2" height="15.0" fill="rgb(213,51,48)" rx="2" ry="2" />
+<text text-anchor="" x="268.86" y="79.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>database.lua:_M.keepalive (8 samples, 1.29%)</title><rect x="302.1" y="101" width="15.3" height="15.0" fill="rgb(206,7,51)" rx="2" ry="2" />
+<text text-anchor="" x="305.14" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>C:ngx_http_lua_var_get (30 samples, 4.85%)</title><rect x="118.8" y="133" width="57.3" height="15.0" fill="rgb(233,32,7)" rx="2" ry="2" />
+<text text-anchor="" x="121.83" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >C:ngx_..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>C:ngx_http_lua_ngx_print (13 samples, 2.10%)</title><rect x="88.3" y="133" width="24.8" height="15.0" fill="rgb(245,96,42)" rx="2" ry="2" />
+<text text-anchor="" x="91.28" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >C..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>resty.mysql:_recv_packet (143 samples, 23.14%)</title><rect x="903.6" y="85" width="273.0" height="15.0" fill="rgb(205,215,45)" rx="2" ry="2" />
+<text text-anchor="" x="906.59" y="95.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >resty.mysql:_recv_packet</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>C:ngx_http_lua_ngx_log (3 samples, 0.49%)</title><rect x="1184.3" y="85" width="5.7" height="15.0" fill="rgb(240,121,37)" rx="2" ry="2" />
+<text text-anchor="" x="1187.27" y="95.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>builtin#89 (6 samples, 0.97%)</title><rect x="218.1" y="101" width="11.5" height="15.0" fill="rgb(237,105,48)" rx="2" ry="2" />
+<text text-anchor="" x="221.12" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>C:json_encode (13 samples, 2.10%)</title><rect x="52.0" y="117" width="24.8" height="15.0" fill="rgb(211,55,51)" rx="2" ry="2" />
+<text text-anchor="" x="55.01" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >C..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ngx_http_lua_socket_tcp_receive_retval_handler (3 samples, 0.49%)</title><rect x="1117.4" y="53" width="5.8" height="15.0" fill="rgb(232,51,46)" rx="2" ry="2" />
+<text text-anchor="" x="1120.44" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lua_next (3 samples, 0.49%)</title><rect x="666.8" y="53" width="5.8" height="15.0" fill="rgb(248,20,4)" rx="2" ry="2" />
+<text text-anchor="" x="669.83" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>bictcp_cwnd_event (3 samples, 0.49%)</title><rect x="582.8" y="53" width="5.7" height="15.0" fill="rgb(227,66,31)" rx="2" ry="2" />
+<text text-anchor="" x="585.82" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_spin_lock_bh (3 samples, 0.49%)</title><rect x="460.6" y="53" width="5.7" height="15.0" fill="rgb(220,34,2)" rx="2" ry="2" />
+<text text-anchor="" x="463.61" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>finish_task_switch (7 samples, 1.13%)</title><rect x="981.9" y="53" width="13.3" height="15.0" fill="rgb(242,210,32)" rx="2" ry="2" />
+<text text-anchor="" x="984.88" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>resty.mysql:_recv_field_packet (23 samples, 3.72%)</title><rect x="859.7" y="85" width="43.9" height="15.0" fill="rgb(221,109,54)" rx="2" ry="2" />
+<text text-anchor="" x="862.68" y="95.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >rest..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>propagatemark (9 samples, 1.46%)</title><rect x="158.9" y="117" width="17.2" height="15.0" fill="rgb(222,116,18)" rx="2" ry="2" />
+<text text-anchor="" x="161.93" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_spin_lock_bh (5 samples, 0.81%)</title><rect x="911.2" y="53" width="9.6" height="15.0" fill="rgb(229,113,29)" rx="2" ry="2" />
+<text text-anchor="" x="914.23" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lj_str_new (4 samples, 0.65%)</title><rect x="336.5" y="85" width="7.6" height="15.0" fill="rgb(226,21,14)" rx="2" ry="2" />
+<text text-anchor="" x="339.50" y="95.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lj_str_new (3 samples, 0.49%)</title><rect x="365.1" y="85" width="5.8" height="15.0" fill="rgb(208,63,38)" rx="2" ry="2" />
+<text text-anchor="" x="368.15" y="95.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>local_bh_enable (4 samples, 0.65%)</title><rect x="659.2" y="53" width="7.6" height="15.0" fill="rgb(249,35,3)" rx="2" ry="2" />
+<text text-anchor="" x="662.19" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>message.lua:set_messages (3 samples, 0.49%)</title><rect x="351.8" y="101" width="5.7" height="15.0" fill="rgb(228,207,14)" rx="2" ry="2" />
+<text text-anchor="" x="354.78" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>propagatemark (4 samples, 0.65%)</title><rect x="1176.6" y="117" width="7.7" height="15.0" fill="rgb(205,204,23)" rx="2" ry="2" />
+<text text-anchor="" x="1179.63" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>propagatemark (6 samples, 0.97%)</title><rect x="892.1" y="37" width="11.5" height="15.0" fill="rgb(229,124,38)" rx="2" ry="2" />
+<text text-anchor="" x="895.14" y="47.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ngx_http_charset_body_filter (4 samples, 0.65%)</title><rect x="88.3" y="117" width="7.6" height="15.0" fill="rgb(205,131,46)" rx="2" ry="2" />
+<text text-anchor="" x="91.28" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>resty.mysql:read_result (166 samples, 26.86%)</title><rect x="859.7" y="101" width="316.9" height="15.0" fill="rgb(241,180,45)" rx="2" ry="2" />
+<text text-anchor="" x="862.68" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >resty.mysql:read_result</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lj_alloc_free (9 samples, 1.46%)</title><rect x="128.4" y="117" width="17.2" height="15.0" fill="rgb(223,194,1)" rx="2" ry="2" />
+<text text-anchor="" x="131.38" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>syscall_trace_enter (3 samples, 0.49%)</title><rect x="1161.4" y="53" width="5.7" height="15.0" fill="rgb(216,11,40)" rx="2" ry="2" />
+<text text-anchor="" x="1164.36" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>gc_sweep (5 samples, 0.81%)</title><rect x="176.1" y="117" width="9.6" height="15.0" fill="rgb(215,144,19)" rx="2" ry="2" />
+<text text-anchor="" x="179.12" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tcp_event_new_data_sent (4 samples, 0.65%)</title><rect x="802.4" y="53" width="7.6" height="15.0" fill="rgb(219,182,42)" rx="2" ry="2" />
+<text text-anchor="" x="805.39" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ngx_http_lua_socket_tcp_read (3 samples, 0.49%)</title><rect x="1104.1" y="53" width="5.7" height="15.0" fill="rgb(228,188,25)" rx="2" ry="2" />
+<text text-anchor="" x="1107.08" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ngx_http_lua_socket_tcp_setkeepalive (4 samples, 0.65%)</title><rect x="309.8" y="69" width="7.6" height="15.0" fill="rgb(215,223,41)" rx="2" ry="2" />
+<text text-anchor="" x="312.77" y="79.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tcp_recvmsg (5 samples, 0.81%)</title><rect x="1167.1" y="53" width="9.5" height="15.0" fill="rgb(240,31,28)" rx="2" ry="2" />
+<text text-anchor="" x="1170.09" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ngx_http_lua_cleanup_free (4 samples, 0.65%)</title><rect x="302.1" y="69" width="7.7" height="15.0" fill="rgb(246,35,15)" rx="2" ry="2" />
+<text text-anchor="" x="305.14" y="79.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>malloc_consolidate (5 samples, 0.81%)</title><rect x="1064.0" y="53" width="9.5" height="15.0" fill="rgb(225,101,42)" rx="2" ry="2" />
+<text text-anchor="" x="1066.98" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lj_alloc_malloc (4 samples, 0.65%)</title><rect x="145.6" y="117" width="7.6" height="15.0" fill="rgb(237,229,11)" rx="2" ry="2" />
+<text text-anchor="" x="148.57" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ngx_http_lua_calc_strlen_in_table (7 samples, 1.13%)</title><rect x="708.8" y="53" width="13.4" height="15.0" fill="rgb(210,61,52)" rx="2" ry="2" />
+<text text-anchor="" x="711.83" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ngx_http_ssi_header_filter (3 samples, 0.49%)</title><rect x="101.7" y="117" width="5.7" height="15.0" fill="rgb(207,166,12)" rx="2" ry="2" />
+<text text-anchor="" x="104.65" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>skb_set_owner_r (3 samples, 0.49%)</title><rect x="752.8" y="53" width="5.7" height="15.0" fill="rgb(248,87,16)" rx="2" ry="2" />
+<text text-anchor="" x="755.75" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>receiver.lua:_M.get (531 samples, 85.92%)</title><rect x="176.1" y="133" width="1013.9" height="15.0" fill="rgb(225,69,41)" rx="2" ry="2" />
+<text text-anchor="" x="179.12" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >receiver.lua:_M.get</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>__copy_skb_header (3 samples, 0.49%)</title><rect x="399.5" y="53" width="5.7" height="15.0" fill="rgb(215,36,5)" rx="2" ry="2" />
+<text text-anchor="" x="402.51" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ngx_http_lua_socket_tcp_send (3 samples, 0.49%)</title><rect x="733.7" y="53" width="5.7" height="15.0" fill="rgb(222,44,13)" rx="2" ry="2" />
+<text text-anchor="" x="736.66" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>sys_sendto (6 samples, 0.97%)</title><rect x="768.0" y="53" width="11.5" height="15.0" fill="rgb(220,61,49)" rx="2" ry="2" />
+<text text-anchor="" x="771.03" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>0xffffffffa0387601 (3 samples, 0.49%)</title><rect x="382.3" y="53" width="5.8" height="15.0" fill="rgb(220,192,47)" rx="2" ry="2" />
+<text text-anchor="" x="385.33" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ngx_http_lua_var_get (3 samples, 0.49%)</title><rect x="153.2" y="117" width="5.7" height="15.0" fill="rgb(215,54,28)" rx="2" ry="2" />
+<text text-anchor="" x="156.20" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>gc_sweep (3 samples, 0.49%)</title><rect x="252.5" y="69" width="5.7" height="15.0" fill="rgb(248,76,14)" rx="2" ry="2" />
+<text text-anchor="" x="255.49" y="79.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_spin_unlock_irqrestore (61 samples, 9.87%)</title><rect x="466.3" y="53" width="116.5" height="15.0" fill="rgb(251,175,34)" rx="2" ry="2" />
+<text text-anchor="" x="469.34" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_spin_unlock_i..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ngx_http_lua_chain_get_free_buf (3 samples, 0.49%)</title><rect x="722.2" y="53" width="5.7" height="15.0" fill="rgb(218,61,17)" rx="2" ry="2" />
+<text text-anchor="" x="725.20" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>json_process_value (4 samples, 0.65%)</title><rect x="29.1" y="101" width="7.6" height="15.0" fill="rgb(242,57,31)" rx="2" ry="2" />
+<text text-anchor="" x="32.09" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lj_meta_cat (3 samples, 0.49%)</title><rect x="206.7" y="117" width="5.7" height="15.0" fill="rgb(252,203,4)" rx="2" ry="2" />
+<text text-anchor="" x="209.67" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lj_str_new (7 samples, 1.13%)</title><rect x="878.8" y="37" width="13.3" height="15.0" fill="rgb(234,169,53)" rx="2" ry="2" />
+<text text-anchor="" x="881.77" y="47.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lj_cont_dispatch (3 samples, 0.49%)</title><rect x="1184.3" y="69" width="5.7" height="15.0" fill="rgb(239,112,38)" rx="2" ry="2" />
+<text text-anchor="" x="1187.27" y="79.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>process_backlog (3 samples, 0.49%)</title><rect x="747.0" y="53" width="5.8" height="15.0" fill="rgb(210,26,6)" rx="2" ry="2" />
+<text text-anchor="" x="750.02" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tcp_ack (9 samples, 1.46%)</title><rect x="779.5" y="53" width="17.2" height="15.0" fill="rgb(216,131,50)" rx="2" ry="2" />
+<text text-anchor="" x="782.48" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lj_str_new (3 samples, 0.49%)</title><rect x="82.6" y="117" width="5.7" height="15.0" fill="rgb(206,75,36)" rx="2" ry="2" />
+<text text-anchor="" x="85.56" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lj_tab_newkey (3 samples, 0.49%)</title><rect x="351.8" y="69" width="5.7" height="15.0" fill="rgb(237,134,18)" rx="2" ry="2" />
+<text text-anchor="" x="354.78" y="79.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>database.lua:_M.connect (35 samples, 5.66%)</title><rect x="235.3" y="101" width="66.8" height="15.0" fill="rgb(241,85,51)" rx="2" ry="2" />
+<text text-anchor="" x="238.31" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >databas..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>start_callback (5 samples, 0.81%)</title><rect x="758.5" y="53" width="9.5" height="15.0" fill="rgb(232,211,33)" rx="2" ry="2" />
+<text text-anchor="" x="761.48" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lj_vm_exit_interp (3 samples, 0.49%)</title><rect x="296.4" y="53" width="5.7" height="15.0" fill="rgb(209,160,34)" rx="2" ry="2" />
+<text text-anchor="" x="299.41" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ngx_http_lua_ngx_set (3 samples, 0.49%)</title><rect x="113.1" y="117" width="5.7" height="15.0" fill="rgb(230,87,13)" rx="2" ry="2" />
+<text text-anchor="" x="116.11" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>gc_sweep (5 samples, 0.81%)</title><rect x="118.8" y="117" width="9.6" height="15.0" fill="rgb(243,135,51)" rx="2" ry="2" />
+<text text-anchor="" x="121.83" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lj_alloc_free (8 samples, 1.29%)</title><rect x="191.4" y="117" width="15.3" height="15.0" fill="rgb(241,174,28)" rx="2" ry="2" />
+<text text-anchor="" x="194.39" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>__printf_fp (6 samples, 0.97%)</title><rect x="65.4" y="101" width="11.4" height="15.0" fill="rgb(215,222,2)" rx="2" ry="2" />
+<text text-anchor="" x="68.37" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lj_str_new (3 samples, 0.49%)</title><rect x="853.9" y="37" width="5.8" height="15.0" fill="rgb(220,111,43)" rx="2" ry="2" />
+<text text-anchor="" x="856.95" y="47.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lj_tab_next (11 samples, 1.78%)</title><rect x="638.2" y="53" width="21.0" height="15.0" fill="rgb(210,110,45)" rx="2" ry="2" />
+<text text-anchor="" x="641.19" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ngx_unix_send (4 samples, 0.65%)</title><rect x="739.4" y="53" width="7.6" height="15.0" fill="rgb(212,20,47)" rx="2" ry="2" />
+<text text-anchor="" x="742.39" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>receiver.lua:has_next (3 samples, 0.49%)</title><rect x="1184.3" y="117" width="5.7" height="15.0" fill="rgb(228,205,25)" rx="2" ry="2" />
+<text text-anchor="" x="1187.27" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>eth_type_trans (3 samples, 0.49%)</title><rect x="598.1" y="53" width="5.7" height="15.0" fill="rgb(241,221,9)" rx="2" ry="2" />
+<text text-anchor="" x="601.09" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>resty.mysql:send_query (256 samples, 41.42%)</title><rect x="370.9" y="85" width="488.8" height="15.0" fill="rgb(224,116,5)" rx="2" ry="2" />
+<text text-anchor="" x="373.87" y="95.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >resty.mysql:send_query</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>index2adr (3 samples, 0.49%)</title><rect x="995.2" y="53" width="5.8" height="15.0" fill="rgb(210,59,33)" rx="2" ry="2" />
+<text text-anchor="" x="998.24" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>C:json_protect_conversion (35 samples, 5.66%)</title><rect x="10.0" y="133" width="66.8" height="15.0" fill="rgb(253,128,23)" rx="2" ry="2" />
+<text text-anchor="" x="13.00" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >C:json_..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ngx_handle_write_event (4 samples, 0.65%)</title><rect x="701.2" y="53" width="7.6" height="15.0" fill="rgb(234,76,44)" rx="2" ry="2" />
+<text text-anchor="" x="704.20" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>api.lua:1 (618 samples, 100.00%)</title><rect x="10.0" y="149" width="1180.0" height="15.0" fill="rgb(250,134,1)" rx="2" ry="2" />
+<text text-anchor="" x="13.00" y="159.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >api.lua:1</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_IO_vfprintf (4 samples, 0.65%)</title><rect x="52.0" y="101" width="7.6" height="15.0" fill="rgb(213,194,54)" rx="2" ry="2" />
+<text text-anchor="" x="55.01" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>resty.mysql:_M.connect (3 samples, 0.49%)</title><rect x="365.1" y="101" width="5.8" height="15.0" fill="rgb(208,213,2)" rx="2" ry="2" />
+<text text-anchor="" x="368.15" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>nf_iterate (8 samples, 1.29%)</title><rect x="685.9" y="53" width="15.3" height="15.0" fill="rgb(235,67,52)" rx="2" ry="2" />
+<text text-anchor="" x="688.92" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lua_type (4 samples, 0.65%)</title><rect x="672.6" y="53" width="7.6" height="15.0" fill="rgb(226,167,33)" rx="2" ry="2" />
+<text text-anchor="" x="675.56" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>all (618 samples, 100%)</title><rect x="10.0" y="165" width="1180.0" height="15.0" fill="rgb(236,137,32)" rx="2" ry="2" />
+<text text-anchor="" x="13.00" y="175.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_spin_unlock_irqrestore (29 samples, 4.69%)</title><rect x="920.8" y="53" width="55.3" height="15.0" fill="rgb(239,137,19)" rx="2" ry="2" />
+<text text-anchor="" x="923.78" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >_spin..</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lj_strfmt_wfnum (5 samples, 0.81%)</title><rect x="286.9" y="53" width="9.5" height="15.0" fill="rgb(249,10,41)" rx="2" ry="2" />
+<text text-anchor="" x="289.86" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>local_bh_enable (3 samples, 0.49%)</title><rect x="1041.1" y="53" width="5.7" height="15.0" fill="rgb(239,139,2)" rx="2" ry="2" />
+<text text-anchor="" x="1044.07" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>C:ngx_http_lua_socket_tcp_receive (143 samples, 23.14%)</title><rect x="903.6" y="69" width="273.0" height="15.0" fill="rgb(220,215,50)" rx="2" ry="2" />
+<text text-anchor="" x="906.59" y="79.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >C:ngx_http_lua_socket_tcp_receive</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>_int_malloc (5 samples, 0.81%)</title><rect x="10.0" y="101" width="9.5" height="15.0" fill="rgb(238,226,50)" rx="2" ry="2" />
+<text text-anchor="" x="13.00" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>resty.mysql:_M.connect (8 samples, 1.29%)</title><rect x="281.1" y="69" width="15.3" height="15.0" fill="rgb(222,32,24)" rx="2" ry="2" />
+<text text-anchor="" x="284.13" y="79.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>sock_poll (4 samples, 0.65%)</title><rect x="1148.0" y="53" width="7.6" height="15.0" fill="rgb(230,86,25)" rx="2" ry="2" />
+<text text-anchor="" x="1150.99" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lj_tab_setinth (3 samples, 0.49%)</title><rect x="229.6" y="85" width="5.7" height="15.0" fill="rgb(246,83,39)" rx="2" ry="2" />
+<text text-anchor="" x="232.58" y="95.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>message.lua:_M.get_messages (502 samples, 81.23%)</title><rect x="218.1" y="117" width="958.5" height="15.0" fill="rgb(226,153,21)" rx="2" ry="2" />
+<text text-anchor="" x="221.12" y="127.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >message.lua:_M.get_messages</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>resty.mysql:_M.new (3 samples, 0.49%)</title><rect x="296.4" y="85" width="5.7" height="15.0" fill="rgb(253,96,49)" rx="2" ry="2" />
+<text text-anchor="" x="299.41" y="95.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>resty.mysql:_M.query (256 samples, 41.42%)</title><rect x="370.9" y="101" width="488.8" height="15.0" fill="rgb(224,53,30)" rx="2" ry="2" />
+<text text-anchor="" x="373.87" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >resty.mysql:_M.query</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>ngx_event_add_timer (3 samples, 0.49%)</title><rect x="1081.2" y="53" width="5.7" height="15.0" fill="rgb(240,229,50)" rx="2" ry="2" />
+<text text-anchor="" x="1084.17" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tcp_send_delayed_ack (3 samples, 0.49%)</title><rect x="817.7" y="53" width="5.7" height="15.0" fill="rgb(207,210,11)" rx="2" ry="2" />
+<text text-anchor="" x="820.67" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lj_str_new (8 samples, 1.29%)</title><rect x="36.7" y="101" width="15.3" height="15.0" fill="rgb(243,198,38)" rx="2" ry="2" />
+<text text-anchor="" x="39.73" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tcp_transmit_skb (4 samples, 0.65%)</title><rect x="831.0" y="53" width="7.7" height="15.0" fill="rgb(241,153,23)" rx="2" ry="2" />
+<text text-anchor="" x="834.04" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>gc_sweep (6 samples, 0.97%)</title><rect x="859.7" y="37" width="11.4" height="15.0" fill="rgb(221,126,19)" rx="2" ry="2" />
+<text text-anchor="" x="862.68" y="47.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>propagatemark (4 samples, 0.65%)</title><rect x="357.5" y="101" width="7.6" height="15.0" fill="rgb(227,82,23)" rx="2" ry="2" />
+<text text-anchor="" x="360.51" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>0xffffffffa0367004 (6 samples, 0.97%)</title><rect x="370.9" y="53" width="11.4" height="15.0" fill="rgb(239,168,47)" rx="2" ry="2" />
+<text text-anchor="" x="373.87" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>C:ngx_http_lua_ngx_set (3 samples, 0.49%)</title><rect x="113.1" y="133" width="5.7" height="15.0" fill="rgb(231,126,8)" rx="2" ry="2" />
+<text text-anchor="" x="116.11" y="143.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>tcp_write_xmit (5 samples, 0.81%)</title><rect x="844.4" y="53" width="9.5" height="15.0" fill="rgb(239,62,28)" rx="2" ry="2" />
+<text text-anchor="" x="847.40" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>T:resty.mysql:_send_packet (3 samples, 0.49%)</title><rect x="853.9" y="53" width="5.8" height="15.0" fill="rgb(226,64,31)" rx="2" ry="2" />
+<text text-anchor="" x="856.95" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>C:ngx_http_lua_socket_tcp_send (253 samples, 40.94%)</title><rect x="370.9" y="69" width="483.0" height="15.0" fill="rgb(235,10,14)" rx="2" ry="2" />
+<text text-anchor="" x="373.87" y="79.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  >C:ngx_http_lua_socket_tcp_send</text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>gc_sweep (3 samples, 0.49%)</title><rect x="317.4" y="101" width="5.7" height="15.0" fill="rgb(210,94,38)" rx="2" ry="2" />
+<text text-anchor="" x="320.41" y="111.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>__alloc_skb (3 samples, 0.49%)</title><rect x="388.1" y="53" width="5.7" height="15.0" fill="rgb(238,208,15)" rx="2" ry="2" />
+<text text-anchor="" x="391.06" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>__audit_syscall_exit (3 samples, 0.49%)</title><rect x="393.8" y="53" width="5.7" height="15.0" fill="rgb(227,229,11)" rx="2" ry="2" />
+<text text-anchor="" x="396.79" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lj_strfmt_wfnum (4 samples, 0.65%)</title><rect x="344.1" y="85" width="7.7" height="15.0" fill="rgb(219,75,1)" rx="2" ry="2" />
+<text text-anchor="" x="347.14" y="95.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lua_yield (3 samples, 0.49%)</title><rect x="1058.3" y="53" width="5.7" height="15.0" fill="rgb(244,149,31)" rx="2" ry="2" />
+<text text-anchor="" x="1061.25" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lua_resume (3 samples, 0.49%)</title><rect x="1052.5" y="53" width="5.8" height="15.0" fill="rgb(236,219,26)" rx="2" ry="2" />
+<text text-anchor="" x="1055.52" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>lj_alloc_free (4 samples, 0.65%)</title><rect x="258.2" y="69" width="7.7" height="15.0" fill="rgb(217,139,48)" rx="2" ry="2" />
+<text text-anchor="" x="261.22" y="79.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>__send (8 samples, 1.29%)</title><rect x="432.0" y="53" width="15.2" height="15.0" fill="rgb(211,93,25)" rx="2" ry="2" />
+<text text-anchor="" x="434.97" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+<g class="func_g" onmouseover="s(this)" onmouseout="c()" onclick="zoom(this)">
+<title>__ip_local_out (3 samples, 0.49%)</title><rect x="418.6" y="53" width="5.7" height="15.0" fill="rgb(228,119,18)" rx="2" ry="2" />
+<text text-anchor="" x="421.61" y="63.5" font-size="12" font-family="Verdana" fill="rgb(0,0,0)"  ></text>
+</g>
+</svg>

@@ -63,6 +63,7 @@ create database nq character set utf8;
 grant all privileges on nq.* to 'nq'@'localhost' identified by '123456';
 FLUSH PRIVILEGES;
 ```
+
 receiver configuration is described in [REST API](#PULL). This is the global configuration for all receivers.
 
 
