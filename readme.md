@@ -186,7 +186,7 @@ Below are all parameters and their meaning.
   * **max**(optional, default:1): The max number of messages in this queue to return. The actual number of messages returned depends on the number of available messages.
 
   * **retry_num**(optional, default:2): the max number of retry times.
-  * **fail_timeout**(optional, default:120): a time of seconds(float) after which a message is considered failed after it is received but not acknowledged. Details of retry_num and fail_timeout are described in [retry section](#Retry).
+  * **fail_timeout**(optional, default:120): a time of seconds(float) after which a message is considered failed after it is received but not acknowledged. Details of retry_num and fail_timeout are described in [Retry mechanism](#retry-mechanism).
 
 **results**: a dict with queue name as key and a dict of results as value. Every result item is a pair of message id and result string.
 
@@ -217,3 +217,14 @@ Note
 1. `created_time` may be missing if the message is retrived from cache without querying myql.
 
 
+## Todo
+* client
+    * python
+        * gevent pool in io bound scenario
+        * multiprocess pool in cpu bound scenario
+* examples
+    * chat app
+    * send notification
+    * distributed task(CPU or IO bound) across multiple machines
+* error
+    * client abort due to network disconnection
