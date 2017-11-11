@@ -142,14 +142,6 @@ local function set_messages(queue, messages)
     end
 end
 
-local function concat_rec(t, sep)
-    for i, v in ipairs(t) do
-        if type(v) == "table" then
-            t[i] = concat_rec(v, sep)
-        end
-    end
-    return table.concat(t, sep)
-end
 
 function _M.get_messages(queue, receiver, start, max, retry_num)
     assert(start>=0)
@@ -169,9 +161,8 @@ function _M.get_messages(queue, receiver, start, max, retry_num)
             table.insert(result, message)
         else
             -- 1. select from mysql if cache miss
-            log(INFO, 'message #', id, ' miss')
-            local sql = {'select * from ', queue, '_msg where id>=', tostring(start), ' limit ', tostring(max)}
-            -- print('sql: ', concat_rec(sql))
+            local sql = string.format('select * from %s_msg where id >= %d limit %d', queue, start, max)
+            -- print('sql: ', sql)
             local err, errcode, sqlstate
             result, err, errcode, sqlstate = db:query(sql)
             assert(next(result))
@@ -192,15 +183,15 @@ function _M.get_messages(queue, receiver, start, max, retry_num)
         for i, message in ipairs(result) do
             table.insert(values, string.format("(%d, '%s')", message['id'], receiver))
         end
-        sql = {'insert into ', queue, '_rst(m_id, receiver) values', table.concat(values, ',')}
+        sql = string.format('insert into %s_rst(m_id, receiver) values%s', queue, table.concat(values, ','))
     else
         -- handle the special case when retry_num is 0
         for i, message in ipairs(result) do
             table.insert(values, string.format("(%d, '%s', 'failed')", message['id'], receiver))
         end
-        sql ={'insert into ', queue, '_rst(m_id, receiver, status) values', table.concat(values, ',')}
+        sql = string.format('insert into %s_rst(m_id, receiver, status) values%s', queue, table.concat(values, ','))
     end
-    -- print('sql: ', concat_rec(sql))
+    -- print('sql: ', sql)
 
     local res, err, errcode, sqlstate = db:query(sql)
     -- print('res: ', inspect(res))

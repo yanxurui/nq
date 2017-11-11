@@ -28,7 +28,8 @@ git clone --recursive git@github.com:yanxurui/nq.git
 cd nq
 ```
 
-### step 2: manully install nginx & lua libs
+### step 2: install nginx manully
+It's highly recommended to use openresty instead of compile nginx with lua manully.
 skip this step if you are using openresty.
 
 execute INSTALL script (you should adjust it according to your needs)
