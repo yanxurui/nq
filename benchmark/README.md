@@ -221,7 +221,7 @@ The similar question is proposed in openresty's google group
 They solved it by not concatting/formatting string in lua land. Instead, pass an array to lua-nginx's sock:send method. But it doesn't solve the problem fundamentally.
 
 Another way is to change the hash algorithm or don't intern long strings at all. It's also discussed here
-[Github: Reduce string hash collisions](https://github.com/LuaJIT/LuaJIT/issues/168) a year ago. It's a sad news that the author of laujit has not taken action on this issue.
+[Github: Reduce string hash collisions](https://github.com/LuaJIT/LuaJIT/issues/168) a year ago. It's a sad news that the author of luajit has not taken action on this issue.
 
 Finally, I solved it by passing a table of string fragments to cosocket. See [feature: support pass table to send_query](https://github.com/openresty/lua-resty-mysql/pull/68).
 

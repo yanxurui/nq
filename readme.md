@@ -99,7 +99,7 @@ If the param `retry_num` is set to 0, the status of a message will become failed
 
 
 ## REST API
-It's recommended to use a client specific to a language instead of these apis directly. Clients are well written to be efficient and deal with various exceptions. Only python and php clients are available so far.
+It's recommended to use a client specific to a language instead of these apis directly. Clients are well written to be efficient and deal with various exceptions. Only [python client](client) is available so far.
 
 This documentation refers message as job or task depending on application scenario. Receiver is the same as worker, subscriber or consumer meanwhile sender is the same as publisher or producer.
 
@@ -220,7 +220,7 @@ Note
 
 
 ## Todo
-* client
+* ~~client~~
     * python
         * gevent pool in io bound scenario
         * multiprocess pool in cpu bound scenario
