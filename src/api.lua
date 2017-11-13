@@ -47,7 +47,7 @@ if method == 'POST' then
         local r = receiver_cls.new(receiver, data['timeout'])
         
         local results = data['results']        
-        if results then
+        if results and next(results) then
             log(INFO, 'save results for receiver: ', receiver)
             status, res = r:save_results(results)
             if status ~= 200 then
@@ -56,7 +56,7 @@ if method == 'POST' then
         end
 
         local queues = data['queues']
-        if queues then
+        if queues and next(queues) then
             log(INFO, 'pull messages for receiver: ', receiver)
             status, res = r:get(queues)
         end
